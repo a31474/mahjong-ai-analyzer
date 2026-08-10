@@ -59,6 +59,66 @@ cd ..
 
 构建完成后直接访问 `http://localhost:8000` 即可（`web/dist` 由 FastAPI 静态挂载）。
 
+## 部署到服务器
+
+### 前置要求（服务器）
+
+- Linux x86_64，`git`、`uv`、`gcc`/`g++`（编译 PyMahjongGB 扩展）、`curl`（下载权重）
+- **前端只需构建一次**：可在本地构建 `web/dist/` 后随代码一起传服务器，服务器无需 node
+- 单核 CPU + ≥512MB 内存即可（模型 3×26MB，运行内存 ~250MB）；端口默认 8000
+
+### 步骤
+
+```bash
+# 1. 拉取代码
+git clone <你的仓库地址> mahjong-ai-analyzer && cd mahjong-ai-analyzer
+
+# 2. Python 环境（uv 管理，Python 3.12；PyMahjongGB 从 PyPI 安装，需编译，gcc 必备）
+uv venv --python 3.12 .venv
+uv pip install --python .venv/bin/python -r requirements.txt
+
+# 3. 模型权重（~80MB）
+bash backend/fetch_weights.sh
+
+# 4. 前端构建产物（若未随代码携带）
+cd web && npm install && npm run build && cd ..
+
+# 5. 验证启动
+PYTHONPATH=backend .venv/bin/uvicorn backend.main:app --host 0.0.0.0 --port 8000
+curl -s http://127.0.0.1:8000/ | grep -q '<div id="app"' && echo OK
+```
+
+### 常驻运行（systemd）
+
+```ini
+# /etc/systemd/system/mcr-ai.service
+[Unit]
+Description=mcr-ai mahjong analyzer
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/mahjong-ai-analyzer
+Environment=PYTHONPATH=backend
+ExecStart=/opt/mahjong-ai-analyzer/.venv/bin/uvicorn backend.main:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=3
+# 单核单进程即可（模型全局加载一次）；多 worker 会让 LRU 缓存失效且内存翻倍
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl enable --now mcr-ai
+```
+
+### 备注
+
+- **内存**：模型加载一次约 80MB 权重 + numpy 开销，单 worker 足够；不要开 `--workers N`（缓存失效 + 内存翻倍）
+- **网络**：`/api/analyze/prepare` 按 game_id 拉取时，服务器需能访问 `salasasa.cn`（或把 `platform` 指到你的内网地址）
+- **上游地址**：需要 HTTPS 反代（nginx/caddy）时，代理到 `127.0.0.1:8000` 即可；本服务无鉴权，勿直接暴露公网
+- **单学生模式**：`Environment=ENSEMBLE=1` 可切单学生（速度更快，精度略降）
+
 ## API 说明
 
 ### `POST /api/analyze/prepare`
@@ -113,7 +173,7 @@ cd ..
 
 - **花牌剔除**：open_mahjong 花牌 id 51-58（春夏秋冬梅兰竹菊）不计入引擎手牌；起手 `bh`（补花）+ `bd`（补摸）成对处理，`bd` 的补摸者按 `bh` 的补花者确定
 - **吃牌中间张**：`cl/cm/cr` 的 tick[1] 是被吃的弃牌，引擎 Chi 需要顺子中间张——`cl` 弃牌是顺子右端（-1）、`cm` 中间（0）、`cr` 左端（+1）；换算后越界（如 `cr` 吃 9 → 10）判为数据异常
-- **original 域 vs seat 域**：tick 中玩家字段（`bh`/`bd` 补花补摸者、`cl/cm/cr/p/g` 鸣牌者、`hu` 和牌者）均为 **original id**（0-3，与 `p*_tiles` 下标同域）；引擎按当局 `seats` 排列换算座位号。摸/打轮转同样按 original id，`seats` 仅作座位映射
+- **player_index 域（原"original 域"）**：牌谱权威约定（`game_record_format.md:60`）——`p*_tiles` 下标与 tick 中玩家字段（`bh`/`bd` 补花补摸者、`cl/cm/cr/p/g` 鸣牌者、`hu` 和牌者）均为**当局 player_index**（门风位）。`seats[original] = player_index` 仅用于 original ↔ player_index 映射：分析视角以 original 标识，重放时经 `seats` 取该玩家的手牌与座位。摸/打轮转按 player_index。
 - **庄家起手 14 张**：`p0_tiles` 恒为庄家 14 张（13 + 首摸 1），剔花后 14 张合法，不做「>13 即异常」误判
 
 ## 测试
