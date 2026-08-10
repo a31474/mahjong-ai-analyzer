@@ -81,10 +81,7 @@ class Analyzer:
         if obs is None:
             return {'error': 'no obs for node', 'step': step}
         observation, mask = obs['observation'], obs['action_mask']
-        lg = self.model.logits(observation, mask)
-        lg = np.asarray(lg).flatten()
-        ex = np.exp(lg - lg.max())
-        probs = ex / ex.sum()
+        probs = np.asarray(self.model.logits(observation, mask)).flatten()
         po = 2  # OFFSET_ACT['Play']
         legal = [(i, float(probs[i])) for i in range(po, po + 34) if mask[i] > 0]
         legal.sort(key=lambda t: -t[1])

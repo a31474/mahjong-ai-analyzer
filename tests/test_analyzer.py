@@ -4,12 +4,17 @@ from converter import parse_record
 from analyzer import prepare, Analyzer
 
 class StubModel:
+    """契约同 ModelHandle：返回 mask 内归一化的概率分布（各学生 softmax 平均的等价物）。"""
     def logits(self, obs, mask):
         lg = np.zeros(235)
         lg[2:36] = np.arange(34, dtype=np.float32) / 34.0   # Play 概率递增
         ht = np.flatnonzero(obs[2])                          # 手牌位置 (4,9) 扁平索引
         lg[2 + ht] += 5.0                                    # 手牌中的牌被拔高
-        return lg
+        m = np.asarray(mask, dtype=np.float32)
+        lg = np.where(m > 0, lg, -1e30)
+        lg = lg - lg.max()
+        p = np.exp(lg) * (m > 0)
+        return p / p.sum()
 
 def _load():
     with open('tests/fixtures/guobiao_example.json') as f:

@@ -10,7 +10,11 @@ class _StubModel:
     def logits(self, obs, mask):
         import numpy as np
         lg = np.zeros(235); lg[2:36] = 0.1; lg[2 + 9] = 1.0  # 偏好 T1（tile_id 21=筒1，模型 Play 段索引 9）
-        return lg
+        m = np.asarray(mask, dtype=np.float32)
+        lg = np.where(m > 0, lg, -1e30)
+        lg = lg - lg.max()
+        p = np.exp(lg) * (m > 0)
+        return p / p.sum()
 
 def _patch(monkeypatch):
     monkeypatch.setattr(main, '_MODEL', _StubModel())

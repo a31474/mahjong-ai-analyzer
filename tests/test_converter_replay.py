@@ -170,3 +170,33 @@ def test_chi_cr_discard9_boundary_defense():
     ra = replay_round(_chi_fake(ticks), viewer=0)
     assert ra.error is not None
     assert 'out of 1..9' in ra.error
+
+def test_meld_branch_no_duplicate_discard_feed():
+    # 玩家1 弃 W9、玩家2 cl 吃：c 事件已无条件喂 'Player 1 Play W9'，鸣牌分支不得再补喂。
+    # 补喂会让 history 中 W9 出现 2 次 -> DISCARD 平面计数 2（污染 is4thTile/胡判定）。
+    # 修复后 W9 在玩家1 弃牌段只计 1 次。
+    from converter import RoundRecord
+    ticks = [
+        ['d', 22],                  # step0: viewer(0) 摸 T2
+        ['c', 22, 'T'],             # step1: viewer 打 T2 -> 决策点(step0)
+        ['d', 19],                  # step2: 玩家1 摸 W9
+        ['c', 19, 'T'],             # step3: 玩家1 弃 W9
+        ['cl', 19, 2, 17, 18],      # step4: 玩家2 cl 吃 W9（中间张 W8）
+        ['c', 21, 'T'],             # step5: 玩家2 打 T1
+        ['d', 31], ['c', 31, 'B'],  # step6/7: 玩家3 摸打 B1
+        ['d', 22], ['c', 21, 'T'],  # step8/9: viewer 摸 T2 打 T1 -> 决策点(step8)
+        ['liuju'],
+    ]
+    fake = RoundRecord(
+        round_index=1, current_round=1, seats=[0, 1, 2, 3], dealer_index=0,
+        start_player_index=0,
+        hands=[[11, 11, 11, 12, 12, 12, 13, 13, 13, 14, 17, 18, 21],
+               [21] * 13, [31] * 13, [41] * 13],
+        action_ticks=ticks)
+    ra = replay_round(fake, viewer=0)
+    assert ra.error is None
+    assert len(ra.nodes) == 2
+    obs = ra.nodes[1].obs['observation']     # 决策点(step8)：W9 已弃、已被玩家2 吃
+    w9 = 8                                    # OFFSET_TILE['W9']（W1 起 0..8）
+    disc = obs[6 + 4 * 1: 6 + 4 * 1 + 4, :, w9]  # DISCARD 平面 6 起，玩家1 相对座位 p=1
+    assert int(disc.sum()) == 1

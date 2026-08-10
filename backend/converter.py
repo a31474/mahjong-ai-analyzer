@@ -124,6 +124,7 @@ def replay_round(round_rec, viewer):
     current = round_rec.start_player_index   # original 域：摸/打轮转按 original id（seat 排列仅映射座位）
     last_discarder = None
     last_discard_tile = None
+    last_fed = None              # 最近一次成功喂入的 (player, tile)
     pending = None               # 待定决策点: (obs, step, draw_tile) —— 自己摸牌/鸣牌后尚未打牌
     flower_claimant = None       # 最近 bh 的补花者（original 域），bd 补摸给此人
 
@@ -165,6 +166,8 @@ def replay_round(round_rec, viewer):
             if a == 'c':
                 tile = to_csm(tick[1])
                 fed = feed_play(current, tile)
+                if fed:
+                    last_fed = (current, tile)
                 if mine(current):
                     # 只有自己打牌时消费/清空 pending；别人的 c 不清（补花者补摸后
                     # pending 需保留到轮转回自己打牌）
@@ -186,7 +189,7 @@ def replay_round(round_rec, viewer):
                 continue
             if a in ('cl', 'cm', 'cr'):
                 actor = tick[2] if 0 <= tick[2] < len(seats) else current
-                if last_discarder is not None:
+                if last_discarder is not None and last_fed != (last_discarder, last_discard_tile):
                     feed_play(last_discarder, last_discard_tile)
                 tile = chi_middle_tile(tick[1], a)
                 obs = agent.request2obs('Player %d Chi %s' % (_seat_of(seats, actor), tile))
@@ -197,7 +200,7 @@ def replay_round(round_rec, viewer):
                 continue
             if a == 'p':
                 actor = tick[2] if 0 <= tick[2] < len(seats) else current
-                if last_discarder is not None:
+                if last_discarder is not None and last_fed != (last_discarder, last_discard_tile):
                     feed_play(last_discarder, last_discard_tile)
                 obs = agent.request2obs('Player %d Peng' % _seat_of(seats, actor))
                 if obs is not None:
@@ -207,7 +210,7 @@ def replay_round(round_rec, viewer):
                 continue
             if a == 'g':
                 actor = tick[2] if 0 <= tick[2] < len(seats) else current
-                if last_discarder is not None:
+                if last_discarder is not None and last_fed != (last_discarder, last_discard_tile):
                     feed_play(last_discarder, last_discard_tile)
                 agent.request2obs('Player %d Gang' % _seat_of(seats, actor))
                 current = actor

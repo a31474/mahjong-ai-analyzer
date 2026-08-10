@@ -11,12 +11,25 @@ class ModelMissingError(Exception):
 
 
 class ModelHandle:
+    """3 学生 ensemble：与 IJCAI deploy/caiest_cnn/ensemble_infer.py 一致——
+    每个学生 mask 内 softmax（mask=0 置 0）后算术平均，返回已是概率分布（和为 1）。
+    注：softmax(mean logits) != mean softmax，不得再在调用方做二次 softmax。"""
+
     def __init__(self, students):
         self.students = students
 
     def logits(self, obs, mask):
-        lg = sum(s.logits(obs, mask) for s in self.students) / len(self.students)
-        return lg
+        m = np.asarray(mask, dtype=np.float32)
+        acc = None
+        for s in self.students:
+            lg = np.asarray(s.logits(obs, mask)).flatten()
+            lg = np.where(m > 0, lg, -1e30)
+            lg = lg - lg.max()                 # 数值稳定
+            p = np.exp(lg) * (m > 0)
+            s_sum = p.sum()
+            p = p / s_sum if s_sum > 0 else (m / max(1.0, m.sum()))
+            acc = p if acc is None else acc + p
+        return acc / len(self.students)
 
 
 def _load_one(path):

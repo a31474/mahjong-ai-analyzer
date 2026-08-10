@@ -136,6 +136,6 @@ PYTHONPATH=backend .venv/bin/pytest tests/ -v
 
 - `backend/engine/`：来自 IJCAI-mahjong 竞赛代码（mcr-ai/IJCAI-mahjong/deploy/caiest_cnn），**无 LICENSE**，仅作研究用途
 - `web/src/game2d/`：回放渲染引擎来自 `open_mahjong_unity`（前端），MIT 许可
-- `web/public/game2d-assets/`：音效/贴图资产，见 `ATTRIBUTION.md`
+- `web/public/game2d-assets/`：音效/贴图资产，见 `game2d-assets/sounds/ATTRIBUTION.md`
 - 模型权重 `backend/weights/*.npz`：来自 HuggingFace `Dannibal/ijcai-mahjong-ckpts-2026`（champion/ 目录，IJCAI-2026 亚军 bot kdens3），见 `backend/weights/README.md`；权重不入库，需 `bash backend/fetch_weights.sh` 下载
 - 牌谱数据：salasasa.cn 平台公开对局
