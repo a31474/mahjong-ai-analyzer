@@ -930,9 +930,11 @@ def test_prepare_then_step(monkeypatch):
     data = _load()
     r = client.post('/api/analyze/prepare', json={'record': data})
     assert r.status_code == 200
-    meta = r.json()['meta']
-    aid = r.json()['analysis_id']
+    body = r.json()
+    meta = body['meta']
+    aid = body['analysis_id']
     assert meta['game_id'] == 'upload'
+    assert body['record']['game_title']            # record 随响应返回（前端渲染需要）
     node = meta['rounds'][1]['viewers']['1']['nodes'][0]     # JSON 后 viewers 键为 str
     r2 = client.get('/api/analysis/%s/step' % aid,
                     params={'round': node and meta['rounds'][1]['round_index'],
@@ -1019,7 +1021,8 @@ def api_prepare(body: PrepareBody):
     while len(_prep_cache) > _PREP_CAP:
         _prep_cache.popitem(last=False)
     meta = _prep_cache[aid]
-    return {'analysis_id': aid, 'meta': meta}
+    # record 随响应返回：前端渲染回放需要完整牌谱（上传时前端已有，game_id 拉取时没有）
+    return {'analysis_id': aid, 'meta': meta, 'record': record}
 
 @app.get('/api/analysis/{aid}/step')
 def api_step(aid: str, round: int, step: int, viewer: int = 0):
