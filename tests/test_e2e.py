@@ -15,7 +15,7 @@ def test_real_model_roundtrip():
     model = load_model('backend/weights')
     prep = prepare(record, 'e2e', 'guobiao', [])
     a = Analyzer(model)
-    out = a.analyze_step(prep, round_index=2, step=2, viewer=0)
+    out = a.analyze_step(prep, round_index=2, step=2, viewer=1)
     assert out['ai_top']
     assert all(np.isfinite(x['prob']) for x in out['ai_top'])
     assert out['ai_top'][0]['tile'] in ('W1', 'W2', 'W3', 'W4', 'W5', 'W6', 'W7', 'W8', 'W9',

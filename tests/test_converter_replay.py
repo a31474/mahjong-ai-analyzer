@@ -14,11 +14,12 @@ def test_replay_example_round2():
     g = parse_record(data, 'demo1', [], 'guobiao')
     r = g.rounds[1]                          # 第 2 局: seats=[3,0,1,2]（seats[original]=player_index）
     # 事件: bh(53/0) bd(43) d(21) c(21) d(35) c(35) d(42) c(42) hu_first(1)
-    # original 0 = start_player_index=0（第 1 个摸打者，坐 seat 3）→ 摸 21、打 21
-    ra = replay_round(r, viewer=0)
+    # 牌谱语义（game_record_format.md:60）：pX_tiles 与 tick 玩家字段均为 player_index。
+    # start_player_index=0（player_index 0 = original 1，坐东位=庄）→ 摸 21、打 21
+    ra = replay_round(r, viewer=1)           # original 1 = player_index 0（本局摸打者）
     assert ra.error is None
     assert ra.quan == 0
-    assert ra.seat_wind == 3
+    assert ra.seat_wind == 0
     assert len(ra.nodes) == 1
     n = ra.nodes[0]
     assert n.actual_tile == 'T1'             # 21 -> T1（万11-19/筒21-29，见 test_tiles.CASES）
@@ -27,8 +28,10 @@ def test_replay_example_round2():
 def test_replay_other_viewer_no_node():
     data = _load()
     g = parse_record(data, 'demo1', [], 'guobiao')
-    ra = replay_round(g.rounds[1], viewer=3) # original 3 = player_index 2，本局未摸打即结束
-    assert ra.nodes == []
+    # original 0 = player_index 3（北位）、original 3 = player_index 2（西位），本局未摸打即结束
+    for viewer in (0, 3):
+        ra = replay_round(g.rounds[1], viewer=viewer)
+        assert ra.nodes == []
 
 def test_round1_hu_terminates():
     data = _load()

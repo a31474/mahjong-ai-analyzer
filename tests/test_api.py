@@ -30,10 +30,10 @@ def test_prepare_then_step(monkeypatch):
     aid = body['analysis_id']
     assert meta['game_id'] == 'upload'
     assert body['record']['game_title']            # record 随响应返回（前端渲染需要）
-    node = meta['rounds'][1]['viewers']['0']['nodes'][0]     # JSON 后 viewers 键为 str
+    node = meta['rounds'][1]['viewers']['1']['nodes'][0]     # JSON 后 viewers 键为 str
     r2 = client.get('/api/analysis/%s/step' % aid,
                     params={'round': node and meta['rounds'][1]['round_index'],
-                            'step': node['step'], 'viewer': 0})
+                            'step': node['step'], 'viewer': 1})
     assert r2.status_code == 200
     assert r2.json()['actual_tile'] == 'T1'
     assert r2.json()['ai_top'][0]['tile'] == 'T1'
