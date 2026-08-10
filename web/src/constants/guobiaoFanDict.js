@@ -1,0 +1,26 @@
+export const GUOBIAO_FAN_DICT = {
+  dasixi: '大四喜', dasanyuan: '大三元', lvyise: '绿一色', jiulianbaodeng: '九莲宝灯',
+  sigang: '四杠', sangang: '三杠', lianqidui: '连七对', shisanyao: '十三幺',
+  qingyaojiu: '清幺九', xiaosixi: '小四喜', xiaosanyuan: '小三元', ziyise: '字一色',
+  sianke: '四暗刻', yiseshuanglonghui: '一色双龙会', yisesitongshun: '一色四同顺',
+  yisesijiegao: '一色四节高', yisesibugao: '一色四步高', hunyaojiu: '混幺九',
+  qiduizi: '七对', qixingbukao: '七星不靠', quanshuangke: '全双刻', qingyise: '清一色',
+  yisesantongshun: '一色三同顺', yisesanjiegao: '一色三节高', quanda: '全大',
+  quanzhong: '全中', quanxiao: '全小', qinglong: '清龙', sanseshuanglonghui: '三色双龙会',
+  yisesanbugao: '一色三步高', quandaiwu: '全带五', santongke: '三同刻', sananke: '三暗刻',
+  quanbukao: '全不靠', zuhelong: '组合龙', dayuwu: '大于五', xiaoyuwu: '小于五',
+  sanfengke: '三风刻', hualong: '花龙', tuibudao: '推不倒', sansesantongshun: '三色三同顺',
+  sansesanjiegao: '三色三节高', wufanhe: '无番和', miaoshouhuichun: '妙手回春',
+  haidilaoyue: '海底捞月', gangshangkaihua: '杠上开花', qiangganghe: '抢杠和',
+  pengpenghe: '碰碰和', hunyise: '混一色', sansesanbugao: '三色三步高', wumenqi: '五门齐',
+  quanqiuren: '全求人', shuangangang: '双暗杠', shuangjianke: '双箭刻', quandaiyao: '全带幺',
+  buqiuren: '不求人', shuangminggang: '双明杠', hejuezhang: '和绝张', jianke: '箭刻',
+  quanfengke: '圈风刻', menfengke: '门风刻', menqianqing: '门前清', pinghe: '平和',
+  siguiyi: '四归一', shuangtongke: '双同刻', shuanganke: '双暗刻', angang: '暗杠',
+  duanyao: '断幺', yibangao: '一般高', xixiangfeng: '喜相逢', lianliu: '连六',
+  laoshaofu: '老少副', yaojiuke: '幺九刻', minggang: '明杠', queyimen: '缺一门',
+  wuzi: '无字', bianzhang: '边张', qianzhang: '嵌张', dandiaojiang: '单钓将',
+  zimo: '自摸', huapai: '花牌', mingangang: '明暗杠',
+};
+
+export const GUOBIAO_FAN_KEYS = Object.keys(GUOBIAO_FAN_DICT);

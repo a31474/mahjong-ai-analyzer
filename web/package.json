@@ -1,0 +1,23 @@
+{
+  "name": "mcr-ai-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "element-plus": "^2.4.4",
+    "pinia": "^2.1.7",
+    "pinyin-pro": "^3.26.0",
+    "pixi.js": "^8.18.1",
+    "vue": "^3.3.8",
+    "vue-router": "^4.2.5"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.4",
+    "vite": "^6.4.1"
+  }
+}

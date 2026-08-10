@@ -1,0 +1,591 @@
+import { Container, Graphics, Text, TextStyle, FederatedPointerEvent } from 'pixi.js'
+import {
+  TILE_WIDTH, TILE_HEIGHT, TILE_RADIUS, LINE_WIDTH,
+  SCALE_FACTOR, FRONT_COLOR, BORDER_COLOR,
+  IS_MOBILE_ANY,
+} from './constants'
+import type { WaitDisplay } from './WaitDisplay'
+import { getGameFontFamily } from '../fontLoader'
+import { locale, roundLabelKey, tr } from '../../../i18n'
+import type { RoundLabelFormat } from '../../lib/sceneAppearance'
+
+// ── MyText ────────────────────────────────────────────────────────────
+
+/** Thin wrapper around `Text` with anchor at center. */
+export class MyText extends Container {
+  readonly textObj: Text
+
+  constructor(text: string, style: Partial<TextStyle>) {
+    super()
+    this.textObj = new Text({ text, style })
+    this.textObj.anchor.set(0.5)
+    this.addChild(this.textObj)
+  }
+}
+
+// ── Display ───────────────────────────────────────────────────────────
+
+const SCORE_POSITIONS: [number, number, number][] = [
+  [0, 0.8, 0],    // dir 0 – bottom center
+  [0.8, 0, 1],    // dir 1 – right
+  [0, -0.8, 2],   // dir 2 – top
+  [-0.8, 0, 3],   // dir 3 – left
+]
+
+const WIND_NUDGE = 8 / (TILE_WIDTH * 3)
+const WIND_POSITIONS: [number, number, number][] = [
+  [-0.84 + WIND_NUDGE, 0.84 - WIND_NUDGE, 0],
+  [0.84 - WIND_NUDGE, 0.84 - WIND_NUDGE, 1],
+  [0.84 - WIND_NUDGE, -0.84 + WIND_NUDGE, 2],
+  [-0.84 + WIND_NUDGE, -0.84 + WIND_NUDGE, 3],
+]
+
+/**
+ * A central information panel. Shows round, scores, remaining tiles,
+ * current-turn indicator, queue, and win results.
+ */
+export class Display extends Container {
+  private readonly textEntries = new Map<string, MyText | Graphics>()
+  private indicatorList: Graphics[] = []
+  private onPanelClick: (() => void) | null = null
+
+  constructor(parent: Container) {
+    super()
+
+    const bg = new Graphics()
+    bg.roundRect(-TILE_WIDTH * 3, -TILE_WIDTH * 3, TILE_WIDTH * 6, TILE_WIDTH * 6, TILE_RADIUS)
+    bg.fill({ color: FRONT_COLOR })
+    bg.stroke({ color: BORDER_COLOR, width: LINE_WIDTH })
+    this.addChild(bg)
+
+    parent.addChild(this)
+  }
+
+  setPanelClickHandler(handler: (() => void) | null): void {
+    this.onPanelClick = handler
+    this.eventMode = handler ? 'static' : 'passive'
+    this.cursor = 'default'
+    this.removeAllListeners('pointertap')
+    if (!handler) return
+    this.on('pointertap', (event: FederatedPointerEvent) => {
+      if (event.button !== 0) return
+      this.onPanelClick?.()
+    })
+  }
+
+  // ── Text management ──────────────────────────────────────────────
+
+  addText(
+    key: string, text: string,
+    x = 0, y = 0, rot = 0,
+    fontSize = 200, math = false, color = 0x000000,
+    simfang = false, maxLength = 5.1,
+  ): void {
+    this.removeText(key)
+
+    const processed = math ? text.replace(/-/g, '\u2212') : text
+    const defaultScale = IS_MOBILE_ANY ? 4 : 1
+    const fontFamily = getGameFontFamily()
+
+    const label = new MyText(processed, {
+      fontFamily, fontSize: fontSize / defaultScale, fill: color, align: 'center',
+    })
+    label.scale.set(defaultScale)
+    label.rotation = -rot * Math.PI / 2
+    label.x = x * TILE_WIDTH * 3
+    label.y = y * TILE_WIDTH * 3
+
+    // Auto-shrink if too wide
+    if (label.width > TILE_WIDTH * maxLength) {
+      label.scale.set(TILE_WIDTH * maxLength * defaultScale / label.width)
+    }
+
+    this.addChild(label)
+    this.textEntries.set(key, label)
+  }
+
+  removeText(key: string): void {
+    const entry = this.textEntries.get(key)
+    if (!entry) return
+    this.removeChild(entry)
+    entry.destroy({ children: true })
+    this.textEntries.delete(key)
+  }
+
+  clear(): void {
+    for (const key of this.textEntries.keys()) {
+      this.removeText(key)
+    }
+  }
+
+  // ── Score & round ────────────────────────────────────────────────
+
+  setScore(
+    _name: string,
+    score: number,
+    direction: number,
+    offline = false,
+    _maxLength = 4.0,
+    windLabel = '',
+  ): void {
+    const scoreStr = score > 0 ? `+${score}` : `${score}`
+    const [x, y, rot] = SCORE_POSITIONS[direction] ?? [0, 0.8, 0]
+    this.addText(
+      `score${direction}`, scoreStr,
+      x, y, rot, 280, true, offline ? 0x888888 : 0x000000, false, 2.7,
+    )
+    if (windLabel) {
+      const [windX, windY, windRot] = WIND_POSITIONS[direction] ?? [-0.84, 0.84, 0]
+      this.addText(
+        `wind${direction}`, windLabel,
+        windX, windY, windRot, 360, false, offline ? 0x888888 : 0x000000, true, 0.9,
+      )
+    } else {
+      this.removeText(`wind${direction}`)
+    }
+  }
+
+  setRound(roundCounter: number, format: RoundLabelFormat = 'wind-seat'): void {
+    for (let index = 0; index < 3; index += 1) {
+      this.removeText(`round${index}`)
+    }
+    if (roundCounter === -1) {
+      this.addText('round', '结束', 0, 0, 0, 390, false, 0x000000, true)
+      return
+    }
+    this.removeText('round')
+    const label = tr(roundLabelKey(roundCounter, format, locale.value))
+    this.addText('round0', label, 0, -0.12, 0, 360, false, 0x000000, false, 4.8)
+  }
+
+  setScoreText(
+    text: string,
+    direction: number,
+    color = 0x000000,
+  ): void {
+    const [x, y, rot] = SCORE_POSITIONS[direction] ?? [0, 0.8, 0]
+    this.addText(
+      `score${direction}`, text,
+      x, y, rot, 280, true, color, false, 2.7,
+    )
+  }
+
+  setRemaining(rem: number): void {
+    this.addText('remaining', `余 ${rem} 枚`, 0, 0.3, 0, 170)
+  }
+
+  setPresent(direction: number, present: boolean): void {
+    for (const key of [`score${direction}`, `wind${direction}`]) {
+      const entry = this.textEntries.get(key)
+      if (entry instanceof MyText) {
+        entry.textObj.style.fill = present ? 0x000000 : 0x888888
+      }
+    }
+  }
+
+  // ── Current-turn indicator ───────────────────────────────────────
+
+  setCurrent(direction: number): void {
+    // Fade out old indicator
+    for (const indicator of this.indicatorList) {
+      indicator.visible = false
+      this.removeChild(indicator)
+      indicator.destroy()
+    }
+    this.indicatorList.length = 0
+
+    // New indicator
+    const beginX = [-TILE_WIDTH * 1.6, TILE_WIDTH * 1.8, TILE_WIDTH * 1.6, -TILE_WIDTH * 1.8][direction] ?? 0
+    const beginY = [TILE_WIDTH * 1.8, TILE_WIDTH * 1.6, -TILE_WIDTH * 1.8, -TILE_WIDTH * 1.6][direction] ?? 0
+    const endX = [TILE_WIDTH * 1.6, TILE_WIDTH * 1.8 - LINE_WIDTH * 0.7, -TILE_WIDTH * 1.6, -TILE_WIDTH * 1.8 + LINE_WIDTH * 0.7][direction] ?? 0
+    const endY = [TILE_WIDTH * 1.8 - LINE_WIDTH * 0.7, -TILE_WIDTH * 1.6, -TILE_WIDTH * 1.8 + LINE_WIDTH * 0.7, TILE_WIDTH * 1.6][direction] ?? 0
+
+    const indicator = new Graphics()
+    indicator.rect(
+      Math.min(beginX, endX), Math.min(beginY, endY),
+      Math.abs(endX - beginX), Math.abs(endY - beginY),
+    )
+    indicator.fill({ color: 0x909090 })
+    this.addChild(indicator)
+    this.indicatorList.push(indicator)
+  }
+
+  // ── Queue (pending phase) ────────────────────────────────────────
+
+  displayQueue(entries: (string | { label: string; color?: number })[]): void {
+    this.clear()
+    if (!entries || entries.length === 0) return
+    for (let i = 0; i < entries.length; i += 1) {
+      const e = entries[i]
+      if (e == null) continue
+      const label = typeof e === 'string' ? e : e.label
+      const color = typeof e === 'string' ? 0x000000 : (e.color ?? 0x000000)
+      this.addText(`queue${i}`, label, 0, -0.8 + 0.28 * (i + 0.5), 0, 190, false, color)
+    }
+    this.addText('queueCount', `等待中:  ${entries.length}/4`, 0, 0.8, 0, 190)
+  }
+
+  // ── Win result ───────────────────────────────────────────────────
+
+  handleWin(
+    selfDrawn: boolean, winName: string, shootName: string,
+    eachLoss: number, shooterLoss: number,
+    fan: number, fans: string[],
+  ): void {
+    const sc = TILE_WIDTH * 3
+
+    // Top divider
+    const topLine = new Graphics()
+    topLine.rect(-sc * 0.85, -sc * 0.65, sc * 1.7, LINE_WIDTH * 0.7)
+    topLine.fill({ color: BORDER_COLOR })
+    this.addChild(topLine)
+    this.textEntries.set('divider_top', topLine)
+
+    // Title
+    const title = selfDrawn ? `${winName} 自摸和` : `${winName} 和,  ${shootName} 铳`
+    this.addText('title', title, 0, -0.8, 0, 190, false, 0x000000, false, 5.5)
+
+    // Fan list
+    let finalY: number
+    if (fans.length <= 4) {
+      for (let i = 0; i < fans.length; i += 1) {
+        this.addText(`fan${i}`, fans[i], 0,
+          -0.58 + 0.22 * (i + 0.5 + (fans.length === 1 ? 0.25 : 0)),
+          0, 190, false, 0x000000, true)
+      }
+      finalY = -0.54 + 0.22 * Math.max(1.55, fans.length)
+    } else {
+      const textSize = fans.length > 8 ? 140 : 170
+      const lineSpace = fans.length > 8 ? 0.18 : 0.22
+      for (let i = 0; i < fans.length; i += 1) {
+        const left = i * 2 < fans.length
+        this.addText(`fan${i}`, fans[i],
+          left ? -0.4 : 0.4,
+          -0.58 + lineSpace * (left ? i + 0.5 : i - Math.ceil(fans.length / 2) + 0.5),
+          0, textSize, false, 0x000000, true)
+      }
+      finalY = -0.54 + lineSpace * Math.ceil(fans.length / 2)
+    }
+
+    // Bottom divider
+    const botLine = new Graphics()
+    botLine.rect(-sc * 0.85, finalY * sc, sc * 1.7, LINE_WIDTH * 0.7)
+    botLine.fill({ color: BORDER_COLOR })
+    this.addChild(botLine)
+    this.textEntries.set('divider_bot', botLine)
+
+    // Summary
+    const fanStr = fan.toFixed(2)
+    const endText = selfDrawn
+      ? `共 ${fanStr} 番 (各 ${eachLoss}')`
+      : `共 ${fanStr} 番 (${shooterLoss}')`
+    this.addText('summary', endText, 0, finalY + 0.15, 0, 170)
+  }
+
+  // ── Volume ───────────────────────────────────────────────────────
+
+  displayVolume(volume: number): void {
+    this.addText('volume', `音量：${Math.round(volume * 100)}%`, 0, 0, 0, 230, false, 0x000000, true)
+  }
+}
+
+// ── Countdown ─────────────────────────────────────────────────────────
+
+/**
+ * A countdown timer displayed in the bottom-right corner.
+ * Click to draw when the player is the next to draw.
+ */
+export class Countdown extends Container {
+  private expireTime = 0
+  private timerId: ReturnType<typeof setTimeout> | null = null
+  private timerKey: number | string | null = null
+  private lastUrgentSecond: number | null = null
+  private readonly bg: Graphics
+  private readonly timeText: Text
+  /** Optional callback when the player clicks to draw. */
+  onDrawClick: (() => void) | null = null
+  onExpire: (() => void) | null = null
+  onLatencyClick: (() => void) | null = null
+  onUrgentSecond: ((second: number) => void) | null = null
+
+  constructor(parent: Container) {
+    super()
+
+    this.bg = new Graphics()
+    this.bg.roundRect(-TILE_HEIGHT * 0.5, -TILE_HEIGHT * 0.5, TILE_HEIGHT, TILE_HEIGHT, TILE_RADIUS)
+    this.bg.fill({ color: FRONT_COLOR })
+    this.bg.stroke({ color: BORDER_COLOR, width: LINE_WIDTH })
+    this.addChild(this.bg)
+
+    this.timeText = new Text({
+      text: '\u2212',
+      style: { fontFamily: getGameFontFamily(), fontSize: 270, fill: 0x000000, align: 'center' },
+    })
+    this.timeText.anchor.set(0.5)
+    this.addChild(this.timeText)
+
+    this.x = SCALE_FACTOR / 2 - TILE_HEIGHT / 2
+    this.y = SCALE_FACTOR / 2 - TILE_HEIGHT / 2
+
+    this.eventMode = 'static'
+    this.cursor = 'pointer'
+    this.on('pointerover', () => {
+      this.bg.tint = 0xe0e0e0
+    })
+    this.on('pointerout', () => {
+      this.bg.tint = 0xffffff
+    })
+    this.on('pointerdown', (e: FederatedPointerEvent) => {
+      if (e.button !== 0) return
+      if (!this.onDrawClick) {
+        this.onLatencyClick?.()
+      }
+    })
+
+    parent.addChild(this)
+  }
+
+  setTimeMillis(ms: number, timerKey: number | string | null = null): void {
+    if (timerKey !== this.timerKey) {
+      this.timerKey = timerKey
+      this.lastUrgentSecond = null
+    }
+    this.expireTime = Date.now() + ms
+    this.visible = true
+    this.tick()
+  }
+
+  stop(): void {
+    if (this.timerId !== null) {
+      clearTimeout(this.timerId)
+      this.timerId = null
+    }
+    this.expireTime = 0
+    this.timerKey = null
+    this.lastUrgentSecond = null
+    this.bg.tint = 0xffffff
+    this.timeText.text = '\u2212'
+    this.onDrawClick = null
+    this.onExpire = null
+  }
+
+  /** Enable click-to-draw mode. */
+  waitDraw(onDraw: () => void): void {
+    this.onDrawClick = onDraw
+    this.on('pointerdown', (e: FederatedPointerEvent) => {
+      if (e.button !== 0) return
+      this.stop()
+      onDraw()
+    })
+  }
+
+  private tick(): void {
+    if (this.timerId !== null) clearTimeout(this.timerId)
+    const remaining = this.expireTime - Date.now()
+    if (remaining <= 0) {
+      this.timerId = null
+      this.bg.tint = 0xffffff
+      this.timeText.text = '\u2212'
+      this.off('pointerdown')
+      this.onDrawClick = null
+      this.onLatencyClick = null
+      const onExpire = this.onExpire
+      this.onExpire = null
+      onExpire?.()
+      return
+    }
+    const remainingSecond = Math.ceil(remaining / 1000)
+    this.timeText.text = `${remainingSecond}`
+    if (
+      remainingSecond >= 1
+      && remainingSecond <= 3
+      && remainingSecond !== this.lastUrgentSecond
+    ) {
+      this.lastUrgentSecond = remainingSecond
+      this.onUrgentSecond?.(remainingSecond)
+    }
+    this.timerId = setTimeout(() => this.tick(), 100)
+  }
+}
+
+// ── TempLabel ─────────────────────────────────────────────────────────
+
+/**
+ * A temporary label that appears when a player declares a meld,
+ * e.g. "吃", "碰", "杠", "和". Auto-hides after `duration` ms.
+ */
+export class TempLabel extends Container {
+  private expireTime: number | null
+
+  constructor(
+    parent: Container,
+    dir: number,
+    text: string,
+    durationMs: number | null,
+  ) {
+    super()
+
+    const bg = new Graphics()
+    bg.roundRect(-TILE_HEIGHT * 0.5, -TILE_HEIGHT * 0.5, TILE_HEIGHT, TILE_HEIGHT, TILE_RADIUS)
+    bg.fill({ color: FRONT_COLOR })
+    bg.stroke({ color: BORDER_COLOR, width: LINE_WIDTH })
+    this.addChild(bg)
+
+    const label = new Text({
+      text,
+      style: { fontFamily: getGameFontFamily(), fontSize: 270, fill: 0x000000, align: 'center' },
+    })
+    label.anchor.set(0.5)
+    this.addChild(label)
+
+    const l0 = SCALE_FACTOR / 2 - TILE_HEIGHT * 2.5
+    const l1 = 6 * TILE_WIDTH
+    this.x = [l1, l0, -l1, -l0][dir] ?? 0
+    this.y = [l0, -l1, -l0, l1][dir] ?? 0
+    this.rotation = -Math.PI * dir / 2
+
+    this.expireTime = durationMs == null ? null : Date.now() + durationMs
+
+    this.on('pointerover', () => { bg.tint = 0xe0e0e0 })
+    this.on('pointerout', () => { bg.tint = 0xffffff })
+
+    parent.addChild(this)
+
+    if (this.expireTime == null) {
+      return
+    }
+
+    const tick = () => {
+      const remaining = (this.expireTime ?? 0) - Date.now()
+      if (remaining <= 0) {
+        this.dismiss()
+        return
+      }
+      this.alpha = 1
+      setTimeout(tick, 100)
+    }
+    tick()
+  }
+
+  dismiss(): void {
+    this.visible = false
+    this.removeFromParent()
+    this.destroy({ children: true })
+  }
+}
+
+// ── DirLabel ──────────────────────────────────────────────────────────
+
+export class DirLabel extends Container {
+  private readonly bg: Graphics
+  private readonly dirText: Text
+  private readonly localDir: number
+
+  constructor(parent: Container, localDir = 0, _assocWaitDisplay: WaitDisplay | null = null) {
+    super()
+
+    this.localDir = localDir
+
+    this.bg = new Graphics()
+    this.bg.roundRect(-TILE_HEIGHT * 0.5, -TILE_HEIGHT * 0.5, TILE_HEIGHT, TILE_HEIGHT, TILE_RADIUS)
+    this.bg.fill({ color: FRONT_COLOR })
+    this.bg.stroke({ color: BORDER_COLOR, width: LINE_WIDTH })
+    this.addChild(this.bg)
+
+    this.dirText = new Text({
+      text: '',
+      style: { fontFamily: getGameFontFamily(), fontSize: 330, fill: 0x000000, align: 'center' },
+    })
+    this.dirText.anchor.set(0.5)
+    this.dirText.rotation = -Math.PI * localDir / 2
+    this.addChild(this.dirText)
+
+    this.x = (-SCALE_FACTOR / 2 + TILE_HEIGHT / 2) * ([1, -1, -1, 1][localDir] ?? 1)
+    this.y = (SCALE_FACTOR / 2 - TILE_HEIGHT / 2) * ([1, 1, -1, -1][localDir] ?? 1)
+
+    // Corner wind disks are unused in live salasasa UI (winds sit on the center panel).
+    this.visible = false
+    this.eventMode = 'none'
+
+    parent.addChild(this)
+  }
+
+  setDir(dir: number): void {
+    const actualDir = (this.localDir + dir + 4) % 4
+    this.dirText.text = ['東', '南', '西', '北'][actualDir] ?? ''
+  }
+}
+
+// ── TenpaiTipButton ───────────────────────────────────────────────────
+
+/**
+ * Right-side tip button shown while self is in tenpai (stable waits).
+ * Hover reveals WaitDisplay details (same role as Unity TipsBlock).
+ */
+export class TenpaiTipButton extends Container {
+  private readonly bg: Graphics
+  private waitDisplay: WaitDisplay | null = null
+
+  constructor(parent: Container) {
+    super()
+
+    this.bg = new Graphics()
+    const halfSize = TILE_HEIGHT * 0.48
+    this.bg.poly([
+      0, -halfSize,
+      halfSize, 0,
+      0, halfSize,
+      -halfSize, 0,
+    ], true)
+    this.bg.fill({ color: 0x000000 })
+    this.bg.stroke({ color: 0xffffff, width: LINE_WIDTH })
+    this.bg.alpha = 0.68
+    this.addChild(this.bg)
+
+    const label = new Text({
+      text: '!',
+      style: {
+        fontFamily: getGameFontFamily(),
+        fontSize: 270,
+        fontWeight: '700',
+        fill: 0xffffff,
+        align: 'center',
+        trim: true,
+      },
+    })
+    label.anchor.set(0.5)
+    this.addChild(label)
+
+    // Same square and horizontal alignment as countdown; keep an extra ~10px
+    // of visual separation at the standard table scale.
+    this.x = SCALE_FACTOR / 2 - TILE_HEIGHT / 2
+    this.y = SCALE_FACTOR / 2 - TILE_HEIGHT * 1.85
+    this.zIndex = 100001
+
+    this.eventMode = 'static'
+    this.cursor = 'pointer'
+    this.visible = false
+    this.on('pointerover', () => {
+      this.bg.alpha = 0.86
+      this.waitDisplay?.loadData(0)
+    })
+    this.on('pointerout', () => {
+      this.bg.alpha = 0.68
+      this.waitDisplay?.restoreDefault()
+    })
+
+    parent.addChild(this)
+  }
+
+  bindWaitDisplay(waitDisplay: WaitDisplay | null): void {
+    this.waitDisplay = waitDisplay
+  }
+
+  /** Show only for stable tenpai waits (not discard-preview waits_all). */
+  setTenpaiActive(active: boolean): void {
+    this.visible = active
+    if (!active) {
+      this.bg.alpha = 0.68
+    }
+  }
+}
