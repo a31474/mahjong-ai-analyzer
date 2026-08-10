@@ -1761,14 +1761,18 @@ async function submitInput() {
   }
 }
 
-const AI_SUIT_PREFIX: Record<string, number> = { W: 1, T: 2, B: 3, F: 4, J: 4 }
+const AI_SUIT_PREFIX: Record<string, number> = { W: 1, T: 2, B: 3, F: 4 }
+/** IJCAI 字牌 J1=中 J2=发 J3=白 → salasasa 字牌 rank z5/z6/z7（45中 46白 47发）。 */
+const AI_HONOR_RANK: Record<string, number> = { J1: 5, J2: 7, J3: 6 }
 
 function aiTileToMmcr(tile: string): number {
+  const honor = AI_HONOR_RANK[String(tile ?? '')]
+  if (honor) return salasasaTileToMmcr(40 + honor)
   const prefix = String(tile?.[0] ?? '')
   const rank = Number(String(tile ?? '').slice(1))
   const suit = AI_SUIT_PREFIX[prefix]
   if (!suit || !Number.isFinite(rank)) return 0
-  const maxRank = prefix === 'F' ? 4 : prefix === 'J' ? 3 : 9
+  const maxRank = prefix === 'F' ? 4 : 9
   if (rank < 1 || rank > maxRank) return 0
   return salasasaTileToMmcr(suit * 10 + rank)
 }
