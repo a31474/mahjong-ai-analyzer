@@ -252,8 +252,11 @@ sudo ufw allow 80/tcp && sudo ufw allow 443/tcp
 | prep 内存缓存 | `main._prep_cache`（LRU cap 20） | `analysis_id → prepare 结果`（节点元数据 + round 重建数据） | 进程内，重启失效 |
 | step 内存缓存 | `Analyzer.cache`（LRU cap 2000） | `(cache_key, round, step, viewer) → 单步分析结果` | 进程内，重启失效 |
 | **step 磁盘缓存** | `backend/cache/`（gitignore，文件数上限 5000） | 同上（JSON，原子写） | **重启保留** |
+| **牌谱磁盘缓存** | `backend/cache/record/`（gitignore，文件数上限 200） | 原始牌谱 JSON + players/rule（按 game_id，上传按内容 sha1） | **重启保留** |
 
-磁盘缓存键基于 `game_id`（上传牌谱用内容 sha1），不依赖 `analysis_id`——服务重启或新会话后，同一牌谱已分析过的步直接命中磁盘（0 推理），只有新步才重新推理。清空缓存：`rm -rf backend/cache/`。
+- step 磁盘缓存键基于 `cache_key`（game_id / 上传 sha1），不依赖 `analysis_id`——重启或新会话后同一牌谱已分析过的步直接命中磁盘（0 推理）
+- 牌谱磁盘缓存让同一 game_id 的 prepare 跳过平台拉取（含重启后）；上传路径按内容 sha1 去重
+- 清空缓存：`rm -rf backend/cache/`
 
 ## 性能基准
 

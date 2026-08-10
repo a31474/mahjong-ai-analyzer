@@ -25,8 +25,10 @@ _MODEL_ERR = None
 _ANALYZER = None
 _prep_cache = OrderedDict()
 _PREP_CAP = 20
-# 单步分析结果磁盘持久化（backend/cache/，gitignore）；重启后同一牌谱的已分析步免重复推理
-_STEP_DISK = DiskCache(os.path.join(os.path.dirname(__file__), 'cache'))
+# 磁盘持久化（backend/cache/，gitignore）：重启后同一牌谱免重复推理/拉取
+_CACHE_DIR = os.path.join(os.path.dirname(__file__), 'cache')
+_STEP_DISK = DiskCache(_CACHE_DIR)                                  # 单步分析结果
+_RECORD_DISK = DiskCache(os.path.join(_CACHE_DIR, 'record'), file_cap=200)  # 牌谱原始 JSON
 
 def _record_cache_key(record, game_id):
     """持久化缓存键：game_id 路径直接用 game_id；上传路径用 record 内容 sha1
@@ -36,6 +38,17 @@ def _record_cache_key(record, game_id):
     return 'sha1:' + hashlib.sha1(
         json.dumps(record, sort_keys=True, ensure_ascii=False).encode('utf-8')
     ).hexdigest()
+
+def _load_record(game_id, platform):
+    """牌谱磁盘缓存：命中直接返回（跳过平台拉取），未命中拉取并存盘。"""
+    hit = _RECORD_DISK.get(game_id)
+    if hit is not None:
+        return hit
+    fetched = fetch_record(game_id, platform)
+    entry = {'record': fetched['record'], 'players': fetched['players'],
+             'rule': fetched.get('rule')}
+    _RECORD_DISK.put(game_id, entry)
+    return entry
 
 def _get_model():
     global _MODEL, _MODEL_ERR
@@ -64,12 +77,18 @@ def api_prepare(body: PrepareBody):
         if 'record' not in body.record and 'game_round' not in body.record:
             raise HTTPException(status_code=400, detail='record 字段需为牌谱 JSON')
         record = body.record.get('record', body.record)
+        # 上传路径也入盘（键 = 内容 sha1）：重启后同一牌谱再次上传免解析
+        ckey = _record_cache_key(record, game_id)
+        _RECORD_DISK.put(ckey, {'record': record, 'players': players, 'rule': rule})
     elif body.game_id:
         try:
-            fetched = fetch_record(body.game_id, body.platform)
+            entry = _load_record(body.game_id, body.platform)   # 磁盘缓存优先，未命中拉取
         except Exception as e:
             raise HTTPException(status_code=502, detail='拉取牌谱失败: %r' % e)
-        record, game_id, players, rule = fetched['record'], fetched['game_id'], fetched['players'], fetched['rule']
+        record = entry['record']
+        game_id = body.game_id
+        players = entry['players']
+        rule = entry.get('rule')
     else:
         raise HTTPException(status_code=400, detail='需要 game_id 或 record')
     aid = uuid.uuid4().hex[:12]

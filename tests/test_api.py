@@ -67,3 +67,28 @@ def test_health_model_missing(monkeypatch):
     assert r.status_code == 503
     assert r.json()['status'] == 'degraded'
     assert '缺少模型权重' in r.json()['detail']
+
+
+def test_record_disk_cache_skips_fetch(monkeypatch, tmp_path):
+    """game_id 路径：磁盘缓存命中时不再调用 fetch_record。"""
+    import main
+    _patch(monkeypatch)
+    # 指向临时缓存目录，避免污染真实缓存
+    monkeypatch.setattr(main, '_RECORD_DISK', __import__('cache_store').DiskCache(str(tmp_path)))
+    calls = []
+
+    def fake_fetch(game_id, platform):
+        calls.append(game_id)
+        return {'game_id': game_id, 'rule': 'guobiao', 'players': [],
+                'record': {'game_title': {}, 'game_round': {}}}
+
+    monkeypatch.setattr(main, 'fetch_record', fake_fetch)
+    client = TestClient(main.app)
+
+    r1 = client.post('/api/analyze/prepare', json={'game_id': 'abc123XYZ'})
+    assert r1.status_code == 200
+    assert calls == ['abc123XYZ']
+
+    r2 = client.post('/api/analyze/prepare', json={'game_id': 'abc123XYZ'})
+    assert r2.status_code == 200
+    assert calls == ['abc123XYZ']    # 未再拉取
