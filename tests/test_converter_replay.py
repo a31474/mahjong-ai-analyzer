@@ -50,14 +50,14 @@ def test_flower_draw_bridged():
     assert ra.nodes[0].actual_tile == 'F3'   # 43 -> F3
 
 def test_own_discard_claimed_by_next_does_not_crash():
-    # 自己打 T1 被下家 cl 吃：c 事件已 'Player 0 Play T1' 移除手牌，cl 补喂若再次
-    # remove 会 ValueError 崩掉整局。应防御跳过补喂，保留 viewer 打 T1 的决策点。
+    # 自己打 W4 被下家 cl 吃：c 事件已 'Player 0 Play W4' 移除手牌，cl 补喂若再次
+    # remove 会 ValueError 崩掉整局。应防御跳过补喂，保留 viewer 打 W4 的决策点。
     from converter import RoundRecord
     ticks = [
         ['d', 21],                 # step0: viewer 摸 T1
-        ['c', 21, 'T'],            # step1: viewer 打 T1 -> 决策点(step0)
-        ['cl', 22, 1, 20, 21],     # step2: 下家(1) 吃 T1
-        ['c', 22, 'T'],            # step3: 玩家1 打 T2
+        ['c', 14, 'T'],            # step1: viewer 打 W4 -> 决策点(step0)
+        ['cl', 14, 1, 12, 13],     # step2: 下家(1) cl 吃 W4（中间张 W3）
+        ['c', 21, 'T'],            # step3: 玩家1 打 T1
         ['d', 31], ['c', 31, 'B'], # 玩家2 摸打 B1
         ['d', 41], ['c', 41, 'F'], # 玩家3 摸打 F1
         ['d', 42], ['c', 42, 'F'], # step8/9: viewer 摸 F2 打 F2 -> 决策点(step8)
@@ -72,7 +72,7 @@ def test_own_discard_claimed_by_next_does_not_crash():
     assert ra.error is None
     assert len(ra.nodes) == 2
     n0, n1 = ra.nodes
-    assert n0.step == 0 and n0.actual_tile == 'T1'
+    assert n0.step == 0 and n0.actual_tile == 'W4'
     assert n1.step == 8 and n1.actual_tile == 'F2'
     assert ra.nodes[0].ok
 
@@ -96,3 +96,71 @@ def test_bh_updates_current_to_flower_claimant():
     assert ra.nodes[0].seat == 2
     assert ra.nodes[0].step == 1
     assert ra.nodes[0].actual_tile == 'T1'
+
+# ---------- 吃牌（cl/cm/cr）顺子中间张换算 ----------
+
+def _chi_fake(ticks):
+    from converter import RoundRecord
+    return RoundRecord(
+        round_index=1, current_round=1, seats=[0,1,2,3], dealer_index=0,
+        start_player_index=0,
+        hands=[[11,11,11,12,12,12,13,13,13,14,17,18,21], [21]*13, [31]*13, [41]*13],
+        action_ticks=ticks)
+
+def _chi_789_ticks(claim):
+    # viewer 手牌含 7/8（万）；玩家1 弃 9（万）后 viewer cl 吃（弃 9 是顺子右端）。
+    return [
+        ['d', 22],                 # step0: viewer 摸 T2
+        ['c', 22, 'T'],            # step1: viewer 打 T2 -> 决策点(step0)
+        ['d', 19],                 # step2: 玩家1 摸 W9
+        ['c', 19, 'T'],            # step3: 玩家1 弃 W9
+        [claim, 19, 0],            # step4: viewer 吃 9
+        ['c', 21, 'T'],            # step5: viewer 打 T1 -> 决策点(step4)
+        ['liuju'],
+    ]
+
+def test_chi_cl_discard9_boundary():
+    # cl 弃 9（边界）：中间张 = 9-1 = W8，顺子展开 W7W8W9，无 B10 越界崩溃。
+    ra = replay_round(_chi_fake(_chi_789_ticks('cl')), viewer=0)
+    assert ra.error is None
+    assert len(ra.nodes) == 2
+    n = ra.nodes[1]
+    assert n.step == 4 and n.actual_tile == 'T1'
+    assert n.melds == [['CHI', 'W8', 3]]     # offer 3 = cl（弃牌是右端）
+    assert n.draw is None
+
+def test_chi_normalized_discard_id():
+    # tick[1]=109（归一化 9）与 9、19（W9）等价：同一中间张 W8。
+    base = _chi_789_ticks('cl')
+    melds = []
+    for claim_id in (19, 109, 9):
+        ticks = base[:4] + [['cl', claim_id, 0]] + base[5:]
+        ra = replay_round(_chi_fake(ticks), viewer=0)
+        assert ra.error is None
+        melds.append(ra.nodes[1].melds)
+    assert melds[0] == melds[1] == melds[2] == [['CHI', 'W8', 3]]
+
+def test_chi_cr_discard1_boundary():
+    # cr 弃 1（吃 123 边界）：中间张 = 1+1 = W2，顺子展开 W1W2W3。
+    ticks = [
+        ['d', 22],                 # step0: viewer 摸 T2
+        ['c', 22, 'T'],            # step1: viewer 打 T2
+        ['d', 11],                 # step2: 玩家1 摸 W1
+        ['c', 11, 'T'],            # step3: 玩家1 弃 W1
+        ['cr', 11, 0],             # step4: viewer cr 吃 1
+        ['c', 21, 'T'],            # step5: viewer 打 T1 -> 决策点(step4)
+        ['liuju'],
+    ]
+    ra = replay_round(_chi_fake(ticks), viewer=0)
+    assert ra.error is None
+    assert len(ra.nodes) == 2
+    n = ra.nodes[1]
+    assert n.step == 4 and n.actual_tile == 'T1'
+    assert n.melds == [['CHI', 'W2', 1]]     # offer 1 = cr（弃牌是左端）
+
+def test_chi_cr_discard9_boundary_defense():
+    # cr 弃 9 -> 中间张 10 越界：抛 ValueError 走 error 路径（标记失败而非崩溃）。
+    ticks = _chi_789_ticks('cr')
+    ra = replay_round(_chi_fake(ticks), viewer=0)
+    assert ra.error is not None
+    assert 'out of 1..9' in ra.error

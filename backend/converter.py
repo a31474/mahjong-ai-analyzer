@@ -31,6 +31,29 @@ def normalize_tick(tick):
             out.append(v)
     return out
 
+# cl/cm/cr 被吃的弃牌在顺子中的位置 -> 中间张相对弃牌的偏移
+_CHI_DELTA = {'cl': -1, 'cm': 0, 'cr': 1}
+
+def chi_middle_tile(tile_id, action):
+    """cl/cm/cr 的 tick[1] 是被吃的弃牌 id（open_mahjong 编码 11..39；≥100 为
+    归一化 id，如 105=5万/205=5筒/305=5条赤五，与 15/25/35 等价）。FeatureAgent
+    的 Chi 把传入 tile 当顺子中间张展开为 [tile-1, tile, tile+1]，故按吃法换算
+    中间张：cl 弃牌是顺子右端(-1)、cm 是中间(0)、cr 是左端(+1)。换算后点数不在
+    1..9（如 cr 弃 9 -> 10）抛 ValueError，走 replay 的 error 路径。"""
+    if isinstance(tile_id, str):
+        tile_id = int(tile_id)
+    if tile_id >= 100:
+        suit, rank = divmod(tile_id, 100)      # 赤五: 105 -> (1,5) 万5
+    else:
+        suit, rank = divmod(tile_id, 10)       # 普通: 19 -> (1,9) 万9
+    if suit == 0:
+        suit = 1                               # 归一化裸点无花色: 仅万（105=5万）
+    mid_rank = rank + _CHI_DELTA[action]
+    if not 1 <= mid_rank <= 9:
+        raise ValueError('Chi %s discard %d -> middle rank %d out of 1..9'
+                         % (action, tile_id, mid_rank))
+    return to_csm(suit * 10 + mid_rank)
+
 def parse_record(record, game_id, players, rule):
     game_round = record.get('game_round') or {}
     rounds = []
@@ -160,7 +183,8 @@ def replay_round(round_rec, viewer):
                 actor = _seat_of(seats, tick[2])
                 if last_discarder is not None:
                     feed_play(last_discarder, last_discard_tile)
-                obs = agent.request2obs('Player %d Chi %s' % (actor, to_csm(tick[1])))
+                tile = chi_middle_tile(tick[1], a)
+                obs = agent.request2obs('Player %d Chi %s' % (actor, tile))
                 if obs is not None:
                     pending = (obs, step, None)     # 自己吃后待打牌（无摸牌）
                 current = actor
