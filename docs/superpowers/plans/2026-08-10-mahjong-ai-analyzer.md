@@ -215,7 +215,7 @@ src = re.sub(r'//[^\n]*', '', src)          # 删除 // 注释（含行尾）
 src = re.sub(r',\s*([\]}])', r'\1', src)    # 删除尾随逗号（jsonc 允许，json 不允许）
 data = json.loads(src)
 json.dump(data, open('tests/fixtures/guobiao_example.json', 'w'), ensure_ascii=False, indent=1)
-print('fixture ok,', len(data['record']['game_round']), 'rounds')
+print('fixture ok,', len(data['game_round']), 'rounds')
 "
 ```
 
@@ -235,7 +235,7 @@ def _load():
 
 def test_parse_rounds():
     data = _load()
-    g = parse_record(data['record'], 'demo1', [], 'guobiao')
+    g = parse_record(data, 'demo1', [], 'guobiao')
     assert isinstance(g, GameRecord)
     assert len(g.rounds) == 2
     r1 = g.rounds[0]
@@ -245,12 +245,12 @@ def test_parse_rounds():
 
 def test_hands_contain_flower():
     data = _load()
-    g = parse_record(data['record'], 'demo1', [], 'guobiao')
+    g = parse_record(data, 'demo1', [], 'guobiao')
     assert 53 in g.rounds[0].hands[0]      # p0 起手含花 53
 
 def test_bh_variants():
     data = _load()
-    g = parse_record(data['record'], 'demo1', [], 'guobiao')
+    g = parse_record(data, 'demo1', [], 'guobiao')
     bh3 = [t for t in g.rounds[0].action_ticks if t[0] == 'bh']
     assert bh3 and bh3[0][0] == 'bh'       # 3 元素 bh 可解析
 ```
@@ -371,7 +371,7 @@ def test_quan():
 
 def test_replay_example_round2():
     data = _load()
-    g = parse_record(data['record'], 'demo1', [], 'guobiao')
+    g = parse_record(data, 'demo1', [], 'guobiao')
     r = g.rounds[1]                          # 第 2 局: seats=[3,0,1,2]（seats[original]=player_index）
     # 事件: bd(43) d(21) c(21) d(35) c(35) d(42) c(42) hu_first(1)
     # original 1 = player_index 0（start_player_index=0，第 1 个摸打者）→ 摸 43/21、打 21(W3)
@@ -386,13 +386,13 @@ def test_replay_example_round2():
 
 def test_replay_other_viewer_no_node():
     data = _load()
-    g = parse_record(data['record'], 'demo1', [], 'guobiao')
+    g = parse_record(data, 'demo1', [], 'guobiao')
     ra = replay_round(g.rounds[1], viewer=0) # original 0 = player_index 3，本局未摸打即结束
     assert ra.nodes == []
 
 def test_round1_hu_terminates():
     data = _load()
-    g = parse_record(data['record'], 'demo1', [], 'guobiao')
+    g = parse_record(data, 'demo1', [], 'guobiao')
     ra = replay_round(g.rounds[0], viewer=0) # 补花后即 hu_self，无打牌决策点
     assert ra.nodes == []
 
@@ -722,7 +722,7 @@ def _load():
 
 def test_prepare_meta():
     data = _load()
-    prep = prepare(data['record'], 'demo1', 'guobiao', [])
+    prep = prepare(data, 'demo1', 'guobiao', [])
     assert prep['game_id'] == 'demo1'
     r2 = [r for r in prep['rounds'] if r['round_index'] == 2][0]
     vw = r2['viewers'][1]                        # original 1 = player_index 0，本局摸打者
@@ -733,7 +733,7 @@ def test_prepare_meta():
 
 def test_analyze_step_topk():
     data = _load()
-    prep = prepare(data['record'], 'demo1', 'guobiao', [])
+    prep = prepare(data, 'demo1', 'guobiao', [])
     a = Analyzer(StubModel())
     r2 = [r for r in prep['rounds'] if r['round_index'] == 2][0]
     out = a.analyze_step(prep, round_index=2, step=r2['viewers'][1]['nodes'][0]['step'], viewer=1)
@@ -746,7 +746,7 @@ def test_analyze_step_topk():
 
 def test_cache_hit():
     data = _load()
-    prep = prepare(data['record'], 'demo1', 'guobiao', [])
+    prep = prepare(data, 'demo1', 'guobiao', [])
     a = Analyzer(StubModel())
     r2 = [r for r in prep['rounds'] if r['round_index'] == 2][0]
     step = r2['viewers'][1]['nodes'][0]['step']
@@ -928,7 +928,7 @@ def test_prepare_then_step(monkeypatch):
     _patch(monkeypatch)
     client = TestClient(main.app)
     data = _load()
-    r = client.post('/api/analyze/prepare', json={'record': data['record']})
+    r = client.post('/api/analyze/prepare', json={'record': data})
     assert r.status_code == 200
     meta = r.json()['meta']
     aid = r.json()['analysis_id']
@@ -1200,7 +1200,7 @@ pytestmark = pytest.mark.skipif(
 
 def test_real_model_roundtrip():
     with open('tests/fixtures/guobiao_example.json') as f:
-        record = json.load(f)['record']
+        record = json.load(f)
     model = load_model('backend/weights')
     prep = prepare(record, 'e2e', 'guobiao', [])
     a = Analyzer(model)
