@@ -374,14 +374,14 @@ def test_replay_example_round2():
     g = parse_record(data, 'demo1', [], 'guobiao')
     r = g.rounds[1]                          # 第 2 局: seats=[3,0,1,2]（seats[original]=player_index）
     # 事件: bd(43) d(21) c(21) d(35) c(35) d(42) c(42) hu_first(1)
-    # original 1 = player_index 0（start_player_index=0，第 1 个摸打者）→ 摸 43/21、打 21(W3)
+    # original 1 = player_index 0（start_player_index=0，第 1 个摸打者）→ 摸 43/21、打 21(T1)
     ra = replay_round(r, viewer=1)
     assert ra.error is None
     assert ra.quan == 0
     assert ra.seat_wind == 0
     assert len(ra.nodes) == 1
     n = ra.nodes[0]
-    assert n.actual_tile == 'W3'             # 21 -> W3
+    assert n.actual_tile == 'T1'             # 21 -> T1（21-29 为筒）
     assert n.ok
 
 def test_replay_other_viewer_no_node():
@@ -728,7 +728,7 @@ def test_prepare_meta():
     vw = r2['viewers'][1]                        # original 1 = player_index 0，本局摸打者
     assert vw['error'] is None
     node = vw['nodes'][0]
-    assert node['actual_tile'] == 'W3'
+    assert node['actual_tile'] == 'T1'
     assert 'obs' not in node
 
 def test_analyze_step_topk():
@@ -737,7 +737,7 @@ def test_analyze_step_topk():
     a = Analyzer(StubModel())
     r2 = [r for r in prep['rounds'] if r['round_index'] == 2][0]
     out = a.analyze_step(prep, round_index=2, step=r2['viewers'][1]['nodes'][0]['step'], viewer=1)
-    assert out['actual_tile'] == 'W3'
+    assert out['actual_tile'] == 'T1'
     assert len(out['ai_top']) >= 3
     probs = [p for _, p in out['ai_top']]
     assert all(0 <= p <= 1 for p in probs)
@@ -918,7 +918,7 @@ def _load():
 class _StubModel:
     def logits(self, obs, mask):
         import numpy as np
-        lg = np.zeros(235); lg[2:36] = 0.1; lg[2 + 2] = 1.0   # 偏好 W3
+        lg = np.zeros(235); lg[2:36] = 0.1; lg[2 + 21] = 1.0  # 偏好 T1
         return lg
 
 def _patch(monkeypatch):
@@ -938,8 +938,8 @@ def test_prepare_then_step(monkeypatch):
                     params={'round': node and meta['rounds'][1]['round_index'],
                             'step': node['step'], 'viewer': 1})
     assert r2.status_code == 200
-    assert r2.json()['actual_tile'] == 'W3'
-    assert r2.json()['ai_top'][0]['tile'] == 'W3'
+    assert r2.json()['actual_tile'] == 'T1'
+    assert r2.json()['ai_top'][0]['tile'] == 'T1'
 
 def test_unknown_aid_404(monkeypatch):
     _patch(monkeypatch)
