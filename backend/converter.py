@@ -108,14 +108,25 @@ def replay_round(round_rec, viewer):
     def is_draw_action(a):
         return a in ('d', 'gd', 'bd')
 
+    def feed_play(player, tile):
+        """喂 'Player N Play XX'。自己打牌而 tile 已不在手牌时（补喂时该牌早在
+        c 事件移除、或状态漂移/非法流），跳过喂食避免 FeatureAgent 对 p==0
+        无条件 hand.remove 崩溃；返回是否实际喂入。"""
+        if player == seat_wind and tile not in agent.hand:
+            return False
+        agent.request2obs('Player %d Play %s' % (player, tile))
+        return True
+
     try:
         for step, tick in enumerate(round_rec.action_ticks):
             a = tick[0]
             if a == 'bh':
+                if len(tick) > 2 and isinstance(tick[2], int):
+                    current = tick[2]   # 补花者成为摸牌者（seat 域，与 start_player_index 同域）
                 continue
             if is_draw_action(a):
                 if len(tick) > 2 and isinstance(tick[2], int):
-                    current = _seat_of(seats, tick[2])   # bd 可能带 action_player
+                    current = tick[2]   # bd 可能带 action_player（seat 域，同 bh）
                 tid = tick[1]
                 if is_flower(tid):
                     continue                        # 花牌 Draw 吞掉（bd 才是真实补摸）
@@ -128,8 +139,8 @@ def replay_round(round_rec, viewer):
                 continue
             if a == 'c':
                 tile = to_csm(tick[1])
-                agent.request2obs('Player %d Play %s' % (current, tile))
-                if mine() and pending is not None:
+                fed = feed_play(current, tile)
+                if mine() and pending is not None and fed:
                     obs, dstep, draw_tile = pending
                     po = agent.OFFSET_ACT['Play']
                     if obs['action_mask'][po:po+34].any():
@@ -148,7 +159,7 @@ def replay_round(round_rec, viewer):
             if a in ('cl', 'cm', 'cr'):
                 actor = _seat_of(seats, tick[2])
                 if last_discarder is not None:
-                    agent.request2obs('Player %d Play %s' % (last_discarder, last_discard_tile))
+                    feed_play(last_discarder, last_discard_tile)
                 obs = agent.request2obs('Player %d Chi %s' % (actor, to_csm(tick[1])))
                 if obs is not None:
                     pending = (obs, step, None)     # 自己吃后待打牌（无摸牌）
@@ -157,7 +168,7 @@ def replay_round(round_rec, viewer):
             if a == 'p':
                 actor = _seat_of(seats, tick[2])
                 if last_discarder is not None:
-                    agent.request2obs('Player %d Play %s' % (last_discarder, last_discard_tile))
+                    feed_play(last_discarder, last_discard_tile)
                 obs = agent.request2obs('Player %d Peng' % actor)
                 if obs is not None:
                     pending = (obs, step, None)     # 自己碰后待打牌
@@ -166,7 +177,7 @@ def replay_round(round_rec, viewer):
             if a == 'g':
                 actor = _seat_of(seats, tick[2])
                 if last_discarder is not None:
-                    agent.request2obs('Player %d Play %s' % (last_discarder, last_discard_tile))
+                    feed_play(last_discarder, last_discard_tile)
                 agent.request2obs('Player %d Gang' % actor)
                 current = actor
                 continue
