@@ -48,3 +48,22 @@ def test_bad_body_400():
     client = TestClient(main.app)
     r = client.post('/api/analyze/prepare', json={})
     assert r.status_code == 400
+
+
+def test_health_ok(monkeypatch):
+    _patch(monkeypatch)
+    client = TestClient(main.app)
+    r = client.get('/api/health')
+    assert r.status_code == 200
+    body = r.json()
+    assert body['status'] == 'ok'
+    assert body['model'] == 'ready'
+
+def test_health_model_missing(monkeypatch):
+    monkeypatch.setattr(main, '_MODEL', None)
+    monkeypatch.setattr(main, '_MODEL_ERR', '缺少模型权重: /nonexistent')
+    client = TestClient(main.app)
+    r = client.get('/api/health')
+    assert r.status_code == 503
+    assert r.json()['status'] == 'degraded'
+    assert '缺少模型权重' in r.json()['detail']

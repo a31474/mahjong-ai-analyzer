@@ -1,6 +1,7 @@
 import os, uuid
 from collections import OrderedDict
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from fastapi.staticfiles import StaticFiles
 
@@ -31,6 +32,15 @@ def _get_model():
     if _MODEL is None:
         raise HTTPException(status_code=503, detail=_MODEL_ERR or 'model not ready')
     return _MODEL
+
+@app.get('/api/health')
+def api_health():
+    """启动自检/存活探针：主动触发模型加载，就绪 200，模型缺失 503（附原因）。"""
+    try:
+        model = _get_model()
+    except HTTPException as e:
+        return JSONResponse({'status': 'degraded', 'model': 'missing', 'detail': e.detail}, status_code=503)
+    return {'status': 'ok', 'model': 'ready', 'students': len(getattr(model, 'students', []))}
 
 @app.post('/api/analyze/prepare')
 def api_prepare(body: PrepareBody):

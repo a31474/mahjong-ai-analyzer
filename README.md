@@ -100,6 +100,9 @@ After=network.target
 WorkingDirectory=/opt/mahjong-ai-analyzer
 Environment=PYTHONPATH=backend
 ExecStart=/opt/mahjong-ai-analyzer/.venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8000
+# 启动自检：模型加载成功（/api/health 200）才判定启动完成；失败则 systemd 报 failed
+ExecStartPost=/opt/mahjong-ai-analyzer/scripts/healthcheck.sh
+TimeoutStartSec=180
 Restart=always
 RestartSec=3
 # 单核单进程即可（模型全局加载一次）；多 worker 会让 LRU 缓存失效且内存翻倍
