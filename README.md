@@ -245,6 +245,17 @@ sudo ufw allow 80/tcp && sudo ufw allow 443/tcp
 - **player_index 域（原"original 域"）**：牌谱权威约定（`game_record_format.md:60`）——`p*_tiles` 下标与 tick 中玩家字段（`bh`/`bd` 补花补摸者、`cl/cm/cr/p/g` 鸣牌者、`hu` 和牌者）均为**当局 player_index**（门风位）。`seats[original] = player_index` 仅用于 original ↔ player_index 映射：分析视角以 original 标识，重放时经 `seats` 取该玩家的手牌与座位。摸/打轮转按 player_index。
 - **庄家起手 14 张**：`p0_tiles` 恒为庄家 14 张（13 + 首摸 1），剔花后 14 张合法，不做「>13 即异常」误判
 
+## 性能基准
+
+```bash
+PYTHONPATH=backend .venv/bin/python scripts/bench_step.py
+# 可选: --record <牌谱> --round <局号> --viewer <视角> --iterations <推理次数>
+```
+
+输出：prepare 解析耗时、单步分析（冷缓存：重放+3 学生推理 / 热缓存：LRU 命中）、纯推理均值、整局估算。
+
+参考量级（单核 CPU）：单步 ~150-200ms、热缓存命中 0ms、单视角整局 ~2-3s。单核上 numpy 推理耗时波动较大（±20-30%），属正常。
+
 ## 测试
 
 ```bash
