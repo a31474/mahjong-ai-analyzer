@@ -270,7 +270,7 @@
             <h2>加载牌谱进行 AI 复盘</h2>
             <label class="replay-input__field">
               <span>对局 ID（后端从平台拉取）</span>
-              <input v-model="gameIdInput" type="text" placeholder="例如 maRXmmjmqR" @keydown.enter="submitInput" />
+              <input v-model="gameIdInput" type="text" placeholder="对局 ID 或回放链接（如 nfkKiKHWH4 / https://salasasa.cn/2d/record/nfkKiKHWH4）" @keydown.enter="submitInput" />
             </label>
             <label class="replay-input__field">
               <span>平台地址（可选）</span>
@@ -1721,9 +1721,21 @@ function showInputPage() {
   loading.value = false
 }
 
+/** 输入解析：支持纯 game_id、2D 回放链接（/2d/record/{id}）、Unity 回放链接（?recordId={id}）。 */
+function parseGameIdOrUrl(raw: string): string | null {
+  const s = raw.trim()
+  const m2d = s.match(/\/2d\/record\/([A-Za-z0-9_-]+)/)
+  if (m2d) return m2d[1]
+  const mq = s.match(/[?&]recordId=([A-Za-z0-9_-]+)/)
+  if (mq) return mq[1]
+  if (/^[A-Za-z0-9]+$/.test(s)) return s
+  return null
+}
+
 async function submitInput() {
   const trimmed = recordJsonInput.value.trim()
   let payload: { game_id?: string; platform?: string; record?: unknown }
+  let gid = ''
   if (trimmed) {
     let parsed: unknown
     try {
@@ -1734,8 +1746,13 @@ async function submitInput() {
     }
     payload = { record: parsed }
   } else if (gameIdInput.value.trim()) {
+    gid = parseGameIdOrUrl(gameIdInput.value) ?? ''
+    if (!gid) {
+      inputError.value = '无法识别的对局 ID/链接（支持纯 ID、2D 回放链接、Unity 回放链接）'
+      return
+    }
     payload = {
-      game_id: gameIdInput.value.trim(),
+      game_id: gid,
       platform: platformInput.value.trim() || undefined,
     }
   } else {
@@ -1749,7 +1766,7 @@ async function submitInput() {
     analysisId.value = prepared.analysis_id
     const publicRecord = toPublicGameRecord(
       prepared.record,
-      gameIdInput.value.trim() || String(prepared.meta.game_id || 'upload'),
+      gid || gameIdInput.value.trim() || String(prepared.meta.game_id || 'upload'),
       prepared.meta.players,
     )
     inputPage.value = false
