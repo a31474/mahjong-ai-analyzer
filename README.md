@@ -99,7 +99,7 @@ After=network.target
 [Service]
 WorkingDirectory=/opt/mahjong-ai-analyzer
 Environment=PYTHONPATH=backend
-ExecStart=/opt/mahjong-ai-analyzer/.venv/bin/uvicorn backend.main:app --host 0.0.0.0 --port 8000
+ExecStart=/opt/mahjong-ai-analyzer/.venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8000
 Restart=always
 RestartSec=3
 # 单核单进程即可（模型全局加载一次）；多 worker 会让 LRU 缓存失效且内存翻倍
@@ -111,6 +111,72 @@ WantedBy=multi-user.target
 ```bash
 sudo systemctl enable --now mcr-ai
 ```
+
+### nginx 反代 + 速率限制（公网部署）
+
+> 单核 CPU 的瓶颈是 AI 推理（`/api/analyze/step` 单次 10-30ms），必须限速防刷。`prepare` 拉取+解析较重（~几百 ms），限得更严。
+
+```nginx
+# /etc/nginx/conf.d/mcr-ai.conf（域名替换 <YOUR.DOMAIN>；SSL 证书用 certbot 生成）
+limit_req_zone $binary_remote_addr zone=mcr_prepare:10m rate=6r/m;
+limit_req_zone $binary_remote_addr zone=mcr_step:10m rate=60r/m;
+
+server {
+    listen 80;
+    server_name <YOUR.DOMAIN>;
+    # certbot --nginx 自动改写为 443 + 证书
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name <YOUR.DOMAIN>;
+    ssl_certificate     /etc/letsencrypt/live/<YOUR.DOMAIN>/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/<YOUR.DOMAIN>/privkey.pem;
+
+    client_max_body_size 20m;          # 粘贴大牌谱 JSON 用
+    server_tokens off;
+
+    # 静态资源（前端）不限制
+    location /assets/ {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+    }
+    location = / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+    }
+
+    # AI 分析接口按 IP 限速（burst 给少量抖动余量，nodelay 立即放行限速内的请求）
+    location /api/analyze/prepare {
+        limit_req zone=mcr_prepare burst=3 nodelay;
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_read_timeout 60s;        # 拉取平台牌谱可能较慢
+    }
+    location /api/analysis/ {
+        limit_req zone=mcr_step burst=10 nodelay;
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+    }
+}
+```
+
+```bash
+# 1. 证书（需先解析域名到服务器）
+sudo certbot --nginx -d <YOUR.DOMAIN>
+# 2. 校验配置并重载
+sudo nginx -t && sudo systemctl reload nginx
+# 3. 防火墙只放 80/443
+sudo ufw allow 80/tcp && sudo ufw allow 443/tcp
+```
+
+注意事项：
+
+- **误伤**：限速按 IP，NAT 共享出口（如公司/校园网）可能被多人挤占限速额度；`rate` 可按需放宽
+- **Cloudflare**：国内服务器**不建议加**（CF 免费版国内回源延迟大、不稳定）；源站 IP 暴露风险对本服务可接受。若以后换海外服务器再考虑 CF 隐藏源站
+- **防刷加固**（可选）：`limit_req` 之外，可再加 `location` 级 `deny` 名单（恶意 IP 拉黑）、或 nginx access.log 配合 fail2ban
+- uvicorn 监听 `127.0.0.1`（本小节 systemd 已改），8000 端口不对外
 
 ### 备注
 
