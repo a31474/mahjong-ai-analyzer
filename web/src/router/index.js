@@ -6,10 +6,10 @@ const router = createRouter({
   routes: [
     {
       path: '/',
-      redirect: '/replay/sample',
+      redirect: '/replay',
     },
     {
-      path: '/replay/:gameId',
+      path: '/replay/:gameId?',
       name: 'replay',
       component: Replay,
       props: true,
