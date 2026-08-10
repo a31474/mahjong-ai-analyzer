@@ -1,0 +1,6 @@
+numpy
+fastapi
+uvicorn
+PyMahjongGB
+pytest
+httpx

@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.venv/
+backend/weights/*
+!backend/weights/.gitkeep
+web/node_modules/
+web/dist/
