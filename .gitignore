@@ -3,5 +3,6 @@ __pycache__/
 .venv/
 backend/weights/*
 !backend/weights/.gitkeep
+!backend/weights/README.md
 web/node_modules/
 web/dist/
