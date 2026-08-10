@@ -18,7 +18,7 @@ class LRU:
         while len(self.d) > self.cap:
             self.d.popitem(last=False)
 
-def prepare(record, game_id, rule, players):
+def prepare(record, game_id, rule, players, cache_key=None):
     g = parse_record(record, game_id, players, rule)
     rounds = []
     for r in g.rounds:
@@ -37,12 +37,17 @@ def prepare(record, game_id, rule, players):
                        'start_player_index': r.start_player_index,
                        'hands': r.hands, 'action_ticks': r.action_ticks,
                        'viewers': per_viewer})
-    return {'game_id': game_id, 'players': players, 'rounds': rounds}
+    return {'game_id': game_id, 'cache_key': cache_key or game_id,
+            'players': players, 'rounds': rounds}
 
 class Analyzer:
-    def __init__(self, model, cache_cap=2000):
+    def __init__(self, model, cache_cap=2000, disk=None):
         self.model = model
         self.cache = LRU(cache_cap)
+        self.disk = disk        # DiskCache 实例（可选）：单步结果持久化
+
+    def _disk_key(self, prep, round_index, step, viewer):
+        return '%s|%d|%d|%d' % (prep['cache_key'], round_index, step, viewer)
 
     def _node_meta(self, prep, round_index, step, viewer):
         for r in prep['rounds']:
@@ -70,10 +75,15 @@ class Analyzer:
         return None
 
     def analyze_step(self, prep, round_index, step, viewer):
-        key = (prep['game_id'], round_index, step, viewer)
+        key = (prep['cache_key'], round_index, step, viewer)
         hit = self.cache.get(key)
         if hit is not None:
             return hit
+        if self.disk is not None:
+            hit = self.disk.get(self._disk_key(prep, round_index, step, viewer))
+            if hit is not None:
+                self.cache.put(key, hit)
+                return hit
         node, rnd = self._node_meta(prep, round_index, step, viewer)
         if node is None:
             return {'error': 'no such node', 'step': step}
@@ -90,6 +100,8 @@ class Analyzer:
         out = {'step': node['step'], 'player': node['player'], 'seat': node['seat'],
                'actual_tile': node['actual_tile'], 'ai_top': top, 'agree': agree}
         self.cache.put(key, out)
+        if self.disk is not None:
+            self.disk.put(self._disk_key(prep, round_index, step, viewer), out)
         return out
 
 _TILE_NAMES = [*['W%d' % i for i in range(1, 10)],

@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 .venv/
 backend/weights/*
+backend/cache/
 !backend/weights/.gitkeep
 !backend/weights/README.md
 web/node_modules/

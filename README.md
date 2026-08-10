@@ -245,6 +245,16 @@ sudo ufw allow 80/tcp && sudo ufw allow 443/tcp
 - **player_index 域（原"original 域"）**：牌谱权威约定（`game_record_format.md:60`）——`p*_tiles` 下标与 tick 中玩家字段（`bh`/`bd` 补花补摸者、`cl/cm/cr/p/g` 鸣牌者、`hu` 和牌者）均为**当局 player_index**（门风位）。`seats[original] = player_index` 仅用于 original ↔ player_index 映射：分析视角以 original 标识，重放时经 `seats` 取该玩家的手牌与座位。摸/打轮转按 player_index。
 - **庄家起手 14 张**：`p0_tiles` 恒为庄家 14 张（13 + 首摸 1），剔花后 14 张合法，不做「>13 即异常」误判
 
+## 缓存
+
+| 缓存 | 位置 | 内容 | 生命周期 |
+|---|---|---|---|
+| prep 内存缓存 | `main._prep_cache`（LRU cap 20） | `analysis_id → prepare 结果`（节点元数据 + round 重建数据） | 进程内，重启失效 |
+| step 内存缓存 | `Analyzer.cache`（LRU cap 2000） | `(cache_key, round, step, viewer) → 单步分析结果` | 进程内，重启失效 |
+| **step 磁盘缓存** | `backend/cache/`（gitignore，文件数上限 5000） | 同上（JSON，原子写） | **重启保留** |
+
+磁盘缓存键基于 `game_id`（上传牌谱用内容 sha1），不依赖 `analysis_id`——服务重启或新会话后，同一牌谱已分析过的步直接命中磁盘（0 推理），只有新步才重新推理。清空缓存：`rm -rf backend/cache/`。
+
 ## 性能基准
 
 ```bash
