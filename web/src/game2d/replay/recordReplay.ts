@@ -179,18 +179,21 @@ export class RecordReplay {
   }
 
   private computeStartingScores(): number[] {
-    const finalByOriginal = [0, 0, 0, 0]
+    // 玩家最终分缺失（纯 record 上传/players 无 score）时无法反推起始分，回退为 0 起始
+    // （否则 0 - totalChanges 会把整局分数整体偏移，末局结束恒为 0）。
+    const finalByOriginal: (number | null)[] = [null, null, null, null]
     for (let original = 0; original < 4; original += 1) {
       const player = this.detail.players.find((item) => item.original_player_index === original)
         || this.detail.players[original]
-      finalByOriginal[original] = int(player?.score)
+      finalByOriginal[original] = player?.score != null ? int(player.score) : null
     }
     const totalChanges = [0, 0, 0, 0]
     for (const round of this.rounds) {
       const changes = this.scoreChangesByOriginal(round)
       for (let original = 0; original < 4; original += 1) totalChanges[original] += changes[original]
     }
-    return finalByOriginal.map((score, original) => score - totalChanges[original])
+    return finalByOriginal.map((score, original) =>
+      score == null ? 0 : score - totalChanges[original])
   }
 
   private scoresAt(roundIndex: number, node: number): number[] {

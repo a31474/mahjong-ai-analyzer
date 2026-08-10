@@ -14,6 +14,7 @@ def fetch_record(game_id, platform='https://salasasa.cn'):
     for i, p in enumerate(d.get('players') or []):
         orig = p.get('original_player_index')
         players.append({'original': orig if orig is not None else i,
-                        'user_id': p.get('user_id'), 'username': p.get('username')})
+                        'user_id': p.get('user_id'), 'username': p.get('username'),
+                        'score': p.get('score'), 'rank': p.get('rank')})
     return {'game_id': d['game_id'], 'rule': d.get('rule'), 'players': players,
             'record': d['record']}
