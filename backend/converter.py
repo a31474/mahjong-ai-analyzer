@@ -1,4 +1,9 @@
+import sys, os
 from dataclasses import dataclass, field
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'engine'))
+from engine.feature import FeatureAgent
+from tiles import to_csm, is_flower
 
 @dataclass
 class RoundRecord:
@@ -44,3 +49,147 @@ def parse_record(record, game_id, players, rule):
             action_ticks=[normalize_tick(t) for t in (r.get('action_ticks') or [])],
         ))
     return GameRecord(game_id=game_id, rule=rule, players=players, rounds=rounds)
+
+@dataclass
+class DiscardNode:
+    step: int
+    player: int
+    seat: int
+    actual_tile: str
+    hand: list
+    melds: list
+    river: list
+    draw: str
+    obs: dict
+    ok: bool = True
+
+@dataclass
+class RoundAnalysis:
+    round_index: int
+    viewer: int
+    seat_wind: int
+    quan: int
+    nodes: list
+    error: str = None
+
+def quan_of(current_round):
+    return (current_round - 1) // 4
+
+def _seat_of(seats, pid):
+    """open_mahjong tick 中的 player 字段是 original id，FeatureAgent 需要当局座位号。"""
+    return seats[pid] if 0 <= pid < len(seats) else pid
+
+def replay_round(round_rec, viewer):
+    seats = round_rec.seats
+    seat_wind = seats[viewer] if viewer < len(seats) else viewer
+    quan = quan_of(round_rec.current_round)
+    agent = FeatureAgent(seat_wind)
+    agent.request2obs('Wind %d' % quan)
+    hand = [t for t in round_rec.hands[viewer] if not is_flower(t)]
+    if not hand or len(hand) > 13:
+        # 含花起手剔花后 <13 张合法（Deal 已剔花，由 bd 补摸补齐）；>13 或空则数据异常
+        return RoundAnalysis(round_rec.round_index, viewer, seat_wind, quan, [],
+                             error='viewer%d 起手 %d 张(剔花后), 需要 1..13' % (viewer, len(hand)))
+    try:
+        agent.request2obs('Deal ' + ' '.join(to_csm(t) for t in hand))
+    except Exception as e:
+        return RoundAnalysis(round_rec.round_index, viewer, seat_wind, quan, [],
+                             error='Deal 失败: %r' % e)
+
+    nodes = []
+    current = round_rec.start_player_index
+    last_discarder = None
+    last_discard_tile = None
+    pending = None               # 待定决策点: (obs, step, draw_tile) —— 自己摸牌/鸣牌后尚未打牌
+
+    def mine():
+        return current == seat_wind
+
+    def is_draw_action(a):
+        return a in ('d', 'gd', 'bd')
+
+    try:
+        for step, tick in enumerate(round_rec.action_ticks):
+            a = tick[0]
+            if a == 'bh':
+                continue
+            if is_draw_action(a):
+                if len(tick) > 2 and isinstance(tick[2], int):
+                    current = _seat_of(seats, tick[2])   # bd 可能带 action_player
+                tid = tick[1]
+                if is_flower(tid):
+                    continue                        # 花牌 Draw 吞掉（bd 才是真实补摸）
+                tile = to_csm(tid)
+                if mine():
+                    obs = agent.request2obs('Draw ' + tile)
+                    pending = (obs, step, tile)     # 摸牌后待打牌（含摸到的牌）
+                else:
+                    agent.request2obs('Player %d Draw' % current)
+                continue
+            if a == 'c':
+                tile = to_csm(tick[1])
+                agent.request2obs('Player %d Play %s' % (current, tile))
+                if mine() and pending is not None:
+                    obs, dstep, draw_tile = pending
+                    po = agent.OFFSET_ACT['Play']
+                    if obs['action_mask'][po:po+34].any():
+                        nodes.append(DiscardNode(
+                            step=dstep, player=viewer, seat=seat_wind,
+                            actual_tile=tile,
+                            hand=[str(t) for t in agent.hand],
+                            melds=[list(m) for m in agent.packs[0]],
+                            river=list(agent.history[0]),
+                            draw=draw_tile,
+                            obs=obs))
+                pending = None
+                last_discarder, last_discard_tile = current, tile
+                current = (current + 1) % 4
+                continue
+            if a in ('cl', 'cm', 'cr'):
+                actor = _seat_of(seats, tick[2])
+                if last_discarder is not None:
+                    agent.request2obs('Player %d Play %s' % (last_discarder, last_discard_tile))
+                obs = agent.request2obs('Player %d Chi %s' % (actor, to_csm(tick[1])))
+                if obs is not None:
+                    pending = (obs, step, None)     # 自己吃后待打牌（无摸牌）
+                current = actor
+                continue
+            if a == 'p':
+                actor = _seat_of(seats, tick[2])
+                if last_discarder is not None:
+                    agent.request2obs('Player %d Play %s' % (last_discarder, last_discard_tile))
+                obs = agent.request2obs('Player %d Peng' % actor)
+                if obs is not None:
+                    pending = (obs, step, None)     # 自己碰后待打牌
+                current = actor
+                continue
+            if a == 'g':
+                actor = _seat_of(seats, tick[2])
+                if last_discarder is not None:
+                    agent.request2obs('Player %d Play %s' % (last_discarder, last_discard_tile))
+                agent.request2obs('Player %d Gang' % actor)
+                current = actor
+                continue
+            if a == 'ag':
+                if mine():
+                    agent.request2obs('Player %d AnGang %s' % (current, to_csm(tick[1])))
+                else:
+                    agent.request2obs('Player %d AnGang' % current)
+                pending = None                      # 杠了，没有打牌决策
+                continue
+            if a == 'jg':
+                agent.request2obs('Player %d BuGang %s' % (current, to_csm(tick[1])))
+                pending = None
+                continue
+            if a.startswith('hu'):
+                if len(tick) > 1 and isinstance(tick[1], int):
+                    agent.request2obs('Player %d Hu' % _seat_of(seats, tick[1]))
+                break
+            if a == 'liuju':
+                agent.request2obs('Huang')
+                break
+            # ask_hand/ask_other/ca/end 等: 跳过
+    except Exception as e:
+        return RoundAnalysis(round_rec.round_index, viewer, seat_wind, quan, nodes,
+                             error='step%d %r: %r' % (step, tick, e))
+    return RoundAnalysis(round_rec.round_index, viewer, seat_wind, quan, nodes)
