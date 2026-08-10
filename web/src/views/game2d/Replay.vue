@@ -14,6 +14,40 @@
           @wheel.capture.prevent="onBoardWheel"
         />
 
+        <div v-if="replay && sceneReady && analysisId" class="ai-panel" aria-label="AI 复盘面板">
+          <header class="ai-panel__head">
+            <strong>AI 复盘</strong>
+            <span v-if="viewerForAi">{{ viewerForAi.username }} 视角</span>
+          </header>
+          <div v-if="aiLoading" class="ai-panel__state">AI 分析中…</div>
+          <div v-else-if="aiError" class="ai-panel__state is-error">{{ aiError }}</div>
+          <template v-else-if="aiData && aiData.ai_top && aiData.ai_top.length">
+            <ul class="ai-panel__list">
+              <li
+                v-for="(entry, index) in aiData.ai_top"
+                :key="entry.tile"
+                :class="{ 'is-best': index === 0 }"
+              >
+                <span class="ai-panel__tile">
+                  <img :src="mmcrTileAsset(aiTileToMmcr(entry.tile))" :alt="aiTileLabel(entry.tile)" />
+                </span>
+                <span class="ai-panel__bar">
+                  <i :style="{ width: `${Math.round(entry.prob * 100)}%` }" />
+                </span>
+                <strong>{{ (entry.prob * 100).toFixed(1) }}%</strong>
+              </li>
+            </ul>
+            <div class="ai-panel__actual" :class="aiData.agree ? 'is-agree' : 'is-disagree'">
+              <span>实际打出</span>
+              <span class="ai-panel__tile">
+                <img :src="mmcrTileAsset(aiTileToMmcr(aiData.actual_tile))" :alt="aiTileLabel(aiData.actual_tile)" />
+              </span>
+              <em>{{ aiData.agree ? '与 AI 一致' : '与 AI 分歧' }}</em>
+            </div>
+          </template>
+          <div v-else class="ai-panel__state">当前步无 AI 分析数据</div>
+        </div>
+
         <div v-if="replay && sceneReady" class="replay-board-tools">
           <button type="button" :class="{ 'is-active': showOtherHands }" @click="toggleOtherHands">
             {{ showOtherHands ? '隐藏他家手牌' : '显示他家手牌' }}
@@ -227,8 +261,35 @@
           <div class="replay-state__card">
             <strong>{{ errorMessage ? '无法打开牌谱' : '正在读取牌谱' }}</strong>
             <span>{{ errorMessage || '正在重建 2D 牌桌…' }}</span>
-            <button v-if="errorMessage" type="button" @click="router.push('/2d')">返回 2D 大厅</button>
+            <button v-if="errorMessage" type="button" @click="showInputPage">返回输入页</button>
           </div>
+        </div>
+
+        <div v-if="inputPage && !replay && !loading && !errorMessage" class="replay-input-layer">
+          <section class="replay-input-panel">
+            <h2>加载牌谱进行 AI 复盘</h2>
+            <label class="replay-input__field">
+              <span>对局 ID（后端从平台拉取）</span>
+              <input v-model="gameIdInput" type="text" placeholder="例如 maRXmmjmqR" @keydown.enter="submitInput" />
+            </label>
+            <label class="replay-input__field">
+              <span>平台地址（可选）</span>
+              <input v-model="platformInput" type="text" placeholder="https://salasasa.cn" @keydown.enter="submitInput" />
+            </label>
+            <div class="replay-input__or">—— 或直接粘贴牌谱 JSON（上传模式）——</div>
+            <label class="replay-input__field">
+              <span>牌谱 JSON</span>
+              <textarea
+                v-model="recordJsonInput"
+                rows="6"
+                placeholder='{"game_id": "...", "rule": "guobiao", "record": {"game_round": {...}}}'
+              />
+            </label>
+            <button type="button" class="replay-input__submit" :disabled="preparing" @click="submitInput">
+              {{ preparing ? '分析中…' : '开始分析' }}
+            </button>
+            <p v-if="inputError" class="replay-input__error">{{ inputError }}</p>
+          </section>
         </div>
 
         <div v-if="replay && sceneReady" class="replay-controls" aria-label="牌谱播放控制">
@@ -278,7 +339,7 @@
             <p class="replay-header__eyebrow">SALASASA 2D 牌谱</p>
             <h1>{{ detail?.game_id || route.params.gameId }}</h1>
           </div>
-          <button type="button" class="replay-icon-button" title="返回大厅" @click="router.push('/2d')">×</button>
+          <button type="button" class="replay-icon-button" title="加载新牌谱" @click="showInputPage">×</button>
         </header>
 
         <div v-if="!localRecord" class="replay-share">
@@ -385,6 +446,13 @@ import { playerProfileUrl, publicApiGet, publicRecordUrl } from '@/game2d/salasa
 import { RecordReplay, type PublicGameRecord, type RecordRound, type RecordTick } from '@/game2d/replay/recordReplay'
 import { isLocalReplayRecord, loadLocalReplayRecord } from '@/game2d/replay/localReplayRecord'
 import {
+  AiApiError,
+  fetchStep,
+  prepareAnalysis,
+  type AiStepResult,
+  type PrepareResult,
+} from '@/game2d/ai/api'
+import {
   loadStoredSceneAppearance,
   loadStoredVolume,
   resetStoredSceneAppearance,
@@ -451,6 +519,18 @@ const backgroundImage = ref<Awaited<ReturnType<typeof loadStoredSceneBackgroundI
 const backgroundImageLoading = ref(true)
 const appearance = ref(loadStoredSceneAppearance())
 const volume = ref(loadStoredVolume())
+const analysisId = ref<string | null>(null)
+const aiData = ref<AiStepResult | null>(null)
+const aiLoading = ref(false)
+const aiError = ref('')
+const inputPage = ref(false)
+const gameIdInput = ref('')
+const platformInput = ref('')
+const recordJsonInput = ref('')
+const inputError = ref('')
+const preparing = ref(false)
+let aiNodeMaps: Map<number, Map<number, Map<number, number>>> | null = null
+let aiRequestId = 0
 let scene: MahjongScene | null = null
 let playTimer: number | null = null
 let skipNextPositionRender = false
@@ -801,6 +881,20 @@ const xunmuSelectValue = computed(() => (
     ? 'end'
     : String(currentXunmu.value)
 ))
+const viewerForAi = computed(() => (
+  viewpointPlayers.value.find((player) => player.original === viewerOriginal.value) ?? null
+))
+/**
+ * 后端 meta 节点 step 是「决策 tick」（摸牌/鸣牌 tick），本家打牌 tick 是其后的
+ * 第一个 'c'。aiNodeMaps 建立 打牌tick → 后端step 映射，只有当前 tick 命中
+ * 打牌节点时才发起 AI 请求。
+ */
+const aiStepForCurrentTick = computed<number | null>(() => {
+  if (!analysisId.value || !replay.value || !currentRound.value) return null
+  const tick = currentRound.value.action_ticks?.[node.value]
+  if (!tick || String(tick[0] ?? '') !== 'c') return null
+  return aiNodeMaps?.get(roundIndex.value)?.get(viewerOriginal.value)?.get(node.value) ?? null
+})
 const scoreboardPlayers = computed(() => {
   if (!replay.value || !detail.value) return []
   return [0, 1, 2, 3].map((original) => {
@@ -1496,32 +1590,226 @@ async function fetchRecord(gameId: string): Promise<{ value: PublicGameRecord; l
   return { value: await publicApiGet<PublicGameRecord>(publicRecordUrl(gameId)), local: false }
 }
 
+/**
+ * 后端返回的 record 可能是 {game_round} 内层、平台原格式或完整 PublicGameRecord，
+ * 统一规整为前端 RecordReplay 需要的 PublicGameRecord。
+ */
+function toPublicGameRecord(
+  source: Record<string, unknown>,
+  fallbackGameId: string,
+  metaPlayers?: PrepareResult['meta']['players'],
+): PublicGameRecord {
+  const sourceRecord = source.record
+  const gameRound = (sourceRecord != null && typeof sourceRecord === 'object' && (sourceRecord as Record<string, unknown>).game_round != null
+    ? sourceRecord
+    : source.game_round != null ? source : {}) as Record<string, unknown>
+  const rawPlayers = Array.isArray(source.players) ? source.players as Record<string, unknown>[] : metaPlayers ?? []
+  return {
+    game_id: String(source.game_id ?? fallbackGameId),
+    created_at: String(source.created_at ?? ''),
+    rule: String(source.rule ?? 'guobiao'),
+    sub_rule: source.sub_rule != null ? String(source.sub_rule) : null,
+    room_type: source.room_type != null ? String(source.room_type) : null,
+    match_type: source.match_type != null ? String(source.match_type) : null,
+    players: rawPlayers.map((player, index) => ({
+      user_id: Number(player.user_id ?? 0),
+      username: String(player.username ?? `玩家 ${index + 1}`),
+      score: Number(player.score ?? 0),
+      rank: Number(player.rank ?? 0),
+      original_player_index: Number(player.original_player_index ?? player.original ?? index),
+    })),
+    record: { game_round: gameRound.game_round as Record<string, RecordRound> },
+  }
+}
+
+function buildAiNodeMaps(prepMeta: PrepareResult['meta'] | null) {
+  aiNodeMaps = null
+  if (!prepMeta || !replay.value) return
+  const indexByRoundNumber = new Map<number, number>()
+  replay.value.rounds.forEach((round, index) => {
+    indexByRoundNumber.set(Number(round.round_index ?? index + 1), index)
+  })
+  const maps = new Map<number, Map<number, Map<number, number>>>()
+  for (const metaRound of prepMeta.rounds) {
+    const frontIndex = indexByRoundNumber.get(Number(metaRound.round_index))
+    if (frontIndex == null) continue
+    const ticks = replay.value.rounds[frontIndex].action_ticks || []
+    const perViewer = new Map<number, Map<number, number>>()
+    for (let viewer = 0; viewer < 4; viewer += 1) {
+      const discardToStep = new Map<number, number>()
+      const viewerMeta = metaRound.viewers[String(viewer)]
+      if (viewerMeta && !viewerMeta.error) {
+        for (const node of viewerMeta.nodes) {
+          for (let tick = node.step + 1; tick < ticks.length; tick += 1) {
+            if (String(ticks[tick]?.[0] ?? '') === 'c') {
+              discardToStep.set(tick, node.step)
+              break
+            }
+          }
+        }
+      }
+      perViewer.set(viewer, discardToStep)
+    }
+    maps.set(frontIndex, perViewer)
+  }
+  aiNodeMaps = maps
+}
+
+async function requestAi() {
+  const step = aiStepForCurrentTick.value
+  if (!analysisId.value || step == null || !currentRound.value) {
+    aiData.value = null
+    aiError.value = ''
+    aiLoading.value = false
+    return
+  }
+  const requestId = ++aiRequestId
+  aiLoading.value = true
+  try {
+    const backendRound = Number(currentRound.value.round_index ?? roundIndex.value + 1)
+    const result = await fetchStep(analysisId.value, backendRound, step, viewerOriginal.value)
+    if (requestId !== aiRequestId) return
+    aiData.value = result
+    aiError.value = ''
+  } catch (error) {
+    if (requestId !== aiRequestId) return
+    aiData.value = null
+    aiError.value = error instanceof AiApiError && error.status === 503
+      ? 'AI 模型未加载，回放不受影响'
+      : `AI 请求失败（${error instanceof Error ? error.message : String(error)}）`
+  } finally {
+    if (requestId === aiRequestId) aiLoading.value = false
+  }
+}
+
+async function startReplay(record: PublicGameRecord, prepMeta: PrepareResult['meta'] | null) {
+  replay.value = new RecordReplay(record)
+  detail.value = record
+  roundIndex.value = 0
+  node.value = 0
+  viewerOriginal.value = 0
+  showOtherHands.value = true
+  playWinAnimation.value = false
+  chongHintEnabled.value = true
+  showMoqieMode.value = true
+  wallVisible.value = false
+  scoreboardOpen.value = false
+  settingsOpen.value = false
+  aiData.value = null
+  aiError.value = ''
+  buildAiNodeMaps(prepMeta)
+  applyDeepLinkPosition()
+  await nextTick()
+  await mountScene()
+  renderPosition()
+}
+
+function showInputPage() {
+  stopPlaying()
+  resetTerminalPresentation()
+  analysisId.value = null
+  aiData.value = null
+  aiError.value = ''
+  aiNodeMaps = null
+  replay.value = null
+  detail.value = null
+  sceneReady.value = false
+  scene?.destroy()
+  scene = null
+  errorMessage.value = ''
+  inputPage.value = true
+  loading.value = false
+}
+
+async function submitInput() {
+  const trimmed = recordJsonInput.value.trim()
+  let payload: { game_id?: string; platform?: string; record?: unknown }
+  if (trimmed) {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(trimmed)
+    } catch {
+      inputError.value = '牌谱 JSON 解析失败'
+      return
+    }
+    payload = { record: parsed }
+  } else if (gameIdInput.value.trim()) {
+    payload = {
+      game_id: gameIdInput.value.trim(),
+      platform: platformInput.value.trim() || undefined,
+    }
+  } else {
+    inputError.value = '请输入对局 ID 或粘贴牌谱 JSON'
+    return
+  }
+  preparing.value = true
+  inputError.value = ''
+  try {
+    const prepared = await prepareAnalysis(payload)
+    analysisId.value = prepared.analysis_id
+    const publicRecord = toPublicGameRecord(
+      prepared.record,
+      gameIdInput.value.trim() || String(prepared.meta.game_id || 'upload'),
+      prepared.meta.players,
+    )
+    inputPage.value = false
+    await startReplay(publicRecord, prepared.meta)
+  } catch (error) {
+    inputError.value = error instanceof Error ? error.message : '准备牌谱失败'
+  } finally {
+    preparing.value = false
+  }
+}
+
+const AI_SUIT_PREFIX: Record<string, number> = { W: 1, T: 2, B: 3, F: 4, J: 4 }
+
+function aiTileToMmcr(tile: string): number {
+  const prefix = String(tile?.[0] ?? '')
+  const rank = Number(String(tile ?? '').slice(1))
+  const suit = AI_SUIT_PREFIX[prefix]
+  if (!suit || !Number.isFinite(rank)) return 0
+  const maxRank = prefix === 'F' ? 4 : prefix === 'J' ? 3 : 9
+  if (rank < 1 || rank > maxRank) return 0
+  return salasasaTileToMmcr(suit * 10 + rank)
+}
+
+function aiTileLabel(tile: string): string {
+  const prefix = String(tile?.[0] ?? '')
+  const rank = Number(String(tile ?? '').slice(1))
+  const winds = ['东', '南', '西', '北']
+  const honors = ['中', '发', '白']
+  if (prefix === 'F' && rank >= 1 && rank <= 4) return winds[rank - 1]
+  if (prefix === 'J' && rank >= 1 && rank <= 3) return honors[rank - 1]
+  const names: Record<string, string> = { W: '万', T: '筒', B: '条' }
+  return names[prefix] ? `${rank}${names[prefix]}` : String(tile ?? '—')
+}
+
 async function loadRecord() {
+  const gameId = String(route.params.gameId || '')
+  if (!gameId) {
+    loading.value = false
+    showInputPage()
+    return
+  }
   loading.value = true
   errorMessage.value = ''
   stopPlaying()
   resetTerminalPresentation()
   try {
-    const gameId = String(route.params.gameId || '')
-    const { value, local } = await fetchRecord(gameId)
-    if (local) currentRanks.value = {}
-    else await loadCurrentRanks(value)
-    replay.value = new RecordReplay(value)
-    detail.value = value
-    roundIndex.value = 0
-    node.value = 0
-    viewerOriginal.value = 0
-    showOtherHands.value = true
-    playWinAnimation.value = false
-    chongHintEnabled.value = true
-    showMoqieMode.value = true
-    wallVisible.value = false
-    scoreboardOpen.value = false
-    settingsOpen.value = false
-    applyDeepLinkPosition()
-    await nextTick()
-    await mountScene()
-    renderPosition()
+    try {
+      const prepared = await prepareAnalysis({ game_id: gameId })
+      analysisId.value = prepared.analysis_id
+      const publicRecord = toPublicGameRecord(prepared.record, gameId, prepared.meta.players)
+      await startReplay(publicRecord, prepared.meta)
+      return
+    } catch {
+      // 后端不可用/平台拉取失败时走本地兜底（无 AI 分析）
+      const { value, local } = await fetchRecord(gameId)
+      analysisId.value = null
+      if (local) currentRanks.value = {}
+      else await loadCurrentRanks(value)
+      await startReplay(value, null)
+    }
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '牌谱读取失败'
   } finally {
@@ -1555,6 +1843,7 @@ watch([roundIndex, node, viewerOriginal], () => {
   }
   renderPosition()
 })
+watch([roundIndex, node, viewerOriginal], requestAi)
 watch(locale, () => {
   scene?.refreshRoundLabel()
 })
