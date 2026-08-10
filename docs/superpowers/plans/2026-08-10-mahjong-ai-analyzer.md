@@ -11,8 +11,9 @@
 ## Global Constraints
 
 - 推理栈纯 numpy，**禁止** torch/jax（单核服务器、避免与任何 torch 环境混装）。
-- `backend/engine/` 三个文件（`agent.py`、`feature.py`、`numpy_resfused.py`）从 `~/project/mcr-ai/IJCAI-mahjong/deploy/caiest_cnn/` **原样复制**，不修改其逻辑。
-- `feature.py` 顶层 `from MahjongGB import MahjongFanCalculator` 是硬依赖 → 必须先 `pip install PyMahjongGB`（源码在 `~/project/mcr-ai/PyMahjongGB`）。
+- **Python 环境纪律（已发生事故，必须遵守）**：项目虚拟环境为 `~/project/mahjong-ai-analyzer/.venv`（uv 创建，Python 3.12，依赖已装好）。所有 python/pytest/uvicorn 命令一律用 `.venv/bin/` 前缀（本计划中已统一写为 `.venv/bin/python`、`.venv/bin/pytest`）。**禁止**：向 uv 受管解释器（`~/.local/share/uv/python/*`、`~/.local/bin/python3.12` 等）全局 `pip install`（污染共享环境，PEP 668 会拒绝）；不使用 `--break-system-packages`。装新依赖用 `uv pip install --python .venv/bin/python <pkg>`（或在激活的 venv 内 `uv pip install <pkg>`）。
+- `backend/engine/` 三个文件（`agent.py`、`feature.py`、`numpy_resfused.py`）从 `~/project/mcr-ai/IJCAI-mahjong/deploy/caiest_cnn/` **原样复制**，不修改其逻辑（`numpy_resfused.py` 的 torch import 本就在 `convert()` 函数内，顶层无 torch，无需改动）。
+- `feature.py` 顶层 `from MahjongGB import MahjongFanCalculator` 是硬依赖 → 已在 venv 内安装 PyMahjongGB（本地源码 `~/project/mcr-ai/PyMahjongGB` 编译安装，已验证 `from MahjongGB import ...` 可导入）。
 - 花牌（51-58）在转换中完全剔除（IJCAI 牌墙 136 张无花，`flowerCount=0`）。
 - 牌编码：open_mahjong 11-19 万 / 21-29 筒 / 31-39 索 / 41-44 风 / 45-47 箭 / 51-58 花 → IJCAI `W1-W9/T1-T9/B1-B9/F1-F4/J1-J3`。
 - 权重 `kdens_s{0,1,2}_fp16.npz` 放 `backend/weights/`（gitignore），来自 HF `Dannibal/ijcai-mahjong-ckpts-2026` champion/。
@@ -41,11 +42,13 @@
 **Interfaces:**
 - Produces: `backend/engine.feature.FeatureAgent`、`backend/engine.numpy_resfused.NumpyResFused`（现有 API，原样）
 
-- [ ] **Step 1: 安装 PyMahjongGB**
+- [ ] **Step 1: 确认 venv 与 PyMahjongGB 就位（已由控制器完成）**
 
 ```bash
-cd ~/project/mcr-ai/PyMahjongGB && pip install .
+cd ~/project/mahjong-ai-analyzer && .venv/bin/python -c "from MahjongGB import MahjongFanCalculator; import numpy, fastapi, uvicorn, pytest; print('venv ok')"
 ```
+
+Expected: `venv ok`。若失败，用 `uv pip install --python .venv/bin/python <缺失包>` 补装，**绝不**对 uv 受管解释器全局 pip install。
 
 - [ ] **Step 2: 建目录并复制引擎**
 
@@ -55,14 +58,16 @@ cp ~/project/mcr-ai/IJCAI-mahjong/deploy/caiest_cnn/{agent.py,feature.py,numpy_r
 touch ~/project/mahjong-ai-analyzer/backend/__init__.py ~/project/mahjong-ai-analyzer/backend/engine/__init__.py ~/project/mahjong-ai-analyzer/backend/weights/.gitkeep ~/project/mahjong-ai-analyzer/tests/__init__.py
 ```
 
-- [ ] **Step 3: 惰性化 numpy_resfused 的 torch import**
+（注意：目录/文件已部分存在则跳过已存在项；复制必须用 `cp` 保证与源字节一致。）
 
-打开 `backend/engine/numpy_resfused.py`，若 `import torch` 在模块顶层，将其移入 `convert()` 函数内部（推理路径必须零 torch）。
+- [ ] **Step 3: 核对 numpy_resfused 顶层无 torch**
+
+检查 `backend/engine/numpy_resfused.py` 第 48 行附近：`import torch` 应在 `convert()` 函数内部（缩进），模块顶层无 torch。若与源文件有任何差异，用 `cp` 重新复制（原样，不修改）。
 
 - [ ] **Step 4: 验证引擎可导入**
 
 ```bash
-cd ~/project/mahjong-ai-analyzer && PYTHONPATH=backend python3 -c "
+cd ~/project/mahjong-ai-analyzer && PYTHONPATH=backend .venv/bin/python -c "
 from engine.feature import FeatureAgent
 from engine.numpy_resfused import NumpyResFused
 a = FeatureAgent(0)
@@ -72,7 +77,7 @@ print('engine ok:', a.OBS_SIZE, a.ACT_SIZE)
 
 Expected: `engine ok: 38 235`
 
-- [ ] **Step 5: 写 requirements.txt / .gitignore**
+- [ ] **Step 5: 写 requirements.txt / .gitignore / 补充 .gitignore 排除 venv**
 
 ```txt
 # requirements.txt
@@ -80,17 +85,22 @@ numpy
 fastapi
 uvicorn
 PyMahjongGB
+pytest
+httpx
 ```
 
 ```gitignore
 # .gitignore
 __pycache__/
 *.pyc
+.venv/
 backend/weights/*
 !backend/weights/.gitkeep
 web/node_modules/
 web/dist/
 ```
+
+（依赖已在 `.venv` 安装；requirements.txt 供新机器重建环境：`uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r requirements.txt`。）
 
 - [ ] **Step 6: 提交**
 
@@ -138,7 +148,7 @@ def test_flower_raises():
 
 - [ ] **Step 2: 跑测试确认失败**
 
-Run: `cd ~/project/mahjong-ai-analyzer && PYTHONPATH=backend pytest tests/test_tiles.py -v`
+Run: `cd ~/project/mahjong-ai-analyzer && PYTHONPATH=backend .venv/bin/pytest tests/test_tiles.py -v`
 Expected: FAIL（`ModuleNotFoundError: tiles`）
 
 - [ ] **Step 3: 实现**
@@ -166,7 +176,7 @@ def to_csm(tile_id: int) -> str:
 
 - [ ] **Step 4: 跑测试确认通过**
 
-Run: `cd ~/project/mahjong-ai-analyzer && PYTHONPATH=backend pytest tests/test_tiles.py -v`
+Run: `cd ~/project/mahjong-ai-analyzer && PYTHONPATH=backend .venv/bin/pytest tests/test_tiles.py -v`
 Expected: PASS
 
 - [ ] **Step 5: 提交**
@@ -245,7 +255,7 @@ def test_bh_variants():
 
 - [ ] **Step 3: 跑测试确认失败**
 
-Run: `cd ~/project/mahjong-ai-analyzer && PYTHONPATH=backend pytest tests/test_converter_parse.py -v`
+Run: `cd ~/project/mahjong-ai-analyzer && PYTHONPATH=backend .venv/bin/pytest tests/test_converter_parse.py -v`
 Expected: FAIL
 
 - [ ] **Step 4: 实现 parse 层**
@@ -302,7 +312,7 @@ def parse_record(record, game_id, players, rule):
 
 - [ ] **Step 5: 跑测试确认通过**
 
-Run: `cd ~/project/mahjong-ai-analyzer && PYTHONPATH=backend pytest tests/test_converter_parse.py -v`
+Run: `cd ~/project/mahjong-ai-analyzer && PYTHONPATH=backend .venv/bin/pytest tests/test_converter_parse.py -v`
 Expected: PASS
 
 - [ ] **Step 6: 提交**
@@ -400,7 +410,7 @@ def test_flower_draw_bridged():
 
 - [ ] **Step 2: 跑测试确认失败**
 
-Run: `cd ~/project/mahjong-ai-analyzer && PYTHONPATH=backend pytest tests/test_converter_replay.py -v`
+Run: `cd ~/project/mahjong-ai-analyzer && PYTHONPATH=backend .venv/bin/pytest tests/test_converter_replay.py -v`
 Expected: FAIL
 
 - [ ] **Step 3: 实现 replay_round**
@@ -555,7 +565,7 @@ def replay_round(round_rec, viewer):
 
 - [ ] **Step 4: 跑测试确认通过**
 
-Run: `cd ~/project/mahjong-ai-analyzer && PYTHONPATH=backend pytest tests/test_converter_replay.py -v`
+Run: `cd ~/project/mahjong-ai-analyzer && PYTHONPATH=backend .venv/bin/pytest tests/test_converter_replay.py -v`
 Expected: PASS（若示例 fixture 第二局的 expected 与实际不符，以"该局实际 c 事件数"修正断言后重新验证——测试目的是一致性而非示例数据本身）
 
 - [ ] **Step 5: 提交**
@@ -597,7 +607,7 @@ def test_missing_weights_raises():
 
 - [ ] **Step 2: 跑测试确认失败**
 
-Run: `cd ~/project/mahjong-ai-analyzer && PYTHONPATH=backend pytest tests/test_model_loader.py -v`
+Run: `cd ~/project/mahjong-ai-analyzer && PYTHONPATH=backend .venv/bin/pytest tests/test_model_loader.py -v`
 Expected: FAIL
 
 - [ ] **Step 3: 实现 model_loader.py**
@@ -661,7 +671,7 @@ ls -la "$DIR"
 
 - [ ] **Step 5: 跑测试确认通过**
 
-Run: `cd ~/project/mahjong-ai-analyzer && PYTHONPATH=backend pytest tests/test_model_loader.py -v`
+Run: `cd ~/project/mahjong-ai-analyzer && PYTHONPATH=backend .venv/bin/pytest tests/test_model_loader.py -v`
 Expected: PASS
 
 - [ ] **Step 6: 提交**
@@ -748,7 +758,7 @@ def test_cache_hit():
 
 - [ ] **Step 2: 跑测试确认失败**
 
-Run: `cd ~/project/mahjong-ai-analyzer && PYTHONPATH=backend pytest tests/test_analyzer.py -v`
+Run: `cd ~/project/mahjong-ai-analyzer && PYTHONPATH=backend .venv/bin/pytest tests/test_analyzer.py -v`
 Expected: FAIL
 
 - [ ] **Step 3: 实现 salasa.py**
@@ -866,7 +876,7 @@ _TILE_NAMES = [*['W%d' % i for i in range(1, 10)],
 
 - [ ] **Step 5: 跑测试确认通过**
 
-Run: `cd ~/project/mahjong-ai-analyzer && PYTHONPATH=backend pytest tests/test_analyzer.py -v`
+Run: `cd ~/project/mahjong-ai-analyzer && PYTHONPATH=backend .venv/bin/pytest tests/test_analyzer.py -v`
 Expected: PASS
 
 - [ ] **Step 6: 提交**
@@ -945,7 +955,7 @@ def test_bad_body_400():
 
 - [ ] **Step 2: 跑测试确认失败**
 
-Run: `cd ~/project/mahjong-ai-analyzer && PYTHONPATH=backend pytest tests/test_api.py -v`
+Run: `cd ~/project/mahjong-ai-analyzer && PYTHONPATH=backend .venv/bin/pytest tests/test_api.py -v`
 Expected: FAIL
 
 - [ ] **Step 3: 实现 main.py**
@@ -1028,7 +1038,7 @@ if os.path.isdir(_web_dir):
 
 - [ ] **Step 4: 跑测试确认通过**
 
-Run: `cd ~/project/mahjong-ai-analyzer && PYTHONPATH=backend pytest tests/test_api.py -v`
+Run: `cd ~/project/mahjong-ai-analyzer && PYTHONPATH=backend .venv/bin/pytest tests/test_api.py -v`
 Expected: PASS
 
 - [ ] **Step 5: 提交**
@@ -1075,7 +1085,7 @@ cd ~/project/mahjong-ai-analyzer/web && npm install && npm run build
 - [ ] **Step 3: 验证构建产物可被后端托管**
 
 ```bash
-cd ~/project/mahjong-ai-analyzer && PYTHONPATH=backend python3 -m uvicorn main:app --port 8000 &
+cd ~/project/mahjong-ai-analyzer && PYTHONPATH=backend .venv/bin/python -m uvicorn main:app --port 8000 &
 curl -s http://127.0.0.1:8000/ | grep -i '<div id="app"' && echo STATIC_OK
 ```
 
@@ -1150,7 +1160,7 @@ export async function fetchStep(
 
 ```bash
 cd ~/project/mahjong-ai-analyzer/web && npm run build
-cd ~/project/mahjong-ai-analyzer && PYTHONPATH=backend python3 -m uvicorn main:app --port 8000
+cd ~/project/mahjong-ai-analyzer && PYTHONPATH=backend .venv/bin/python -m uvicorn main:app --port 8000
 ```
 
 浏览器打开 `http://127.0.0.1:8000/`：粘贴 fixture JSON → 回放渲染 → 翻到 xunmu 节点 → AI 面板出现 top-3；切换视角后面板数据随视角变化。（模型权重未下载时面板显示 503 提示。）
@@ -1205,7 +1215,7 @@ def test_real_model_roundtrip():
 
 ```bash
 cd ~/project/mahjong-ai-analyzer && bash backend/fetch_weights.sh   # 若尚未下载
-PYTHONPATH=backend pytest tests/ -v
+PYTHONPATH=backend .venv/bin/pytest tests/ -v
 ```
 
 Expected: 全部 PASS（含 test_e2e 真实模型）
@@ -1213,7 +1223,7 @@ Expected: 全部 PASS（含 test_e2e 真实模型）
 - [ ] **Step 3: 真实牌谱端到端（需网络）**
 
 ```bash
-cd ~/project/mahjong-ai-analyzer && PYTHONPATH=backend python3 -c "
+cd ~/project/mahjong-ai-analyzer && PYTHONPATH=backend .venv/bin/python -c "
 from salasa import fetch_record
 from analyzer import prepare, Analyzer
 from model_loader import load_model
