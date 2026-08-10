@@ -13,12 +13,12 @@ def test_replay_example_round2():
     data = _load()
     g = parse_record(data, 'demo1', [], 'guobiao')
     r = g.rounds[1]                          # 第 2 局: seats=[3,0,1,2]（seats[original]=player_index）
-    # 事件: bd(43) d(21) c(21) d(35) c(35) d(42) c(42) hu_first(1)
-    # original 1 = player_index 0（start_player_index=0，第 1 个摸打者）→ 摸 43/21、打 21(W3)
-    ra = replay_round(r, viewer=1)
+    # 事件: bh(53/0) bd(43) d(21) c(21) d(35) c(35) d(42) c(42) hu_first(1)
+    # original 0 = start_player_index=0（第 1 个摸打者，坐 seat 3）→ 摸 21、打 21
+    ra = replay_round(r, viewer=0)
     assert ra.error is None
     assert ra.quan == 0
-    assert ra.seat_wind == 0
+    assert ra.seat_wind == 3
     assert len(ra.nodes) == 1
     n = ra.nodes[0]
     assert n.actual_tile == 'T1'             # 21 -> T1（万11-19/筒21-29，见 test_tiles.CASES）
@@ -27,7 +27,7 @@ def test_replay_example_round2():
 def test_replay_other_viewer_no_node():
     data = _load()
     g = parse_record(data, 'demo1', [], 'guobiao')
-    ra = replay_round(g.rounds[1], viewer=0) # original 0 = player_index 3，本局未摸打即结束
+    ra = replay_round(g.rounds[1], viewer=3) # original 3 = player_index 2，本局未摸打即结束
     assert ra.nodes == []
 
 def test_round1_hu_terminates():
@@ -76,13 +76,19 @@ def test_own_discard_claimed_by_next_does_not_crash():
     assert n1.step == 8 and n1.actual_tile == 'F2'
     assert ra.nodes[0].ok
 
-def test_bh_updates_current_to_flower_claimant():
-    # bh 的补花者(2) 非 start_player(0)，其后的 d 摸牌者应为补花者本人。
+def test_bd_buflower_draw_to_claimant():
+    # bh 的补花者(2) 非 start_player(0)：bh 不改变摸/打轮转；bd 补摸给补花者本人，
+    # 打牌仍按 original 轮转（轮到 2 打时产生决策点）。
     from converter import RoundRecord
     ticks = [
-        ['bh', 53, 2],             # step0: 玩家2 补花
-        ['d', 21],                 # step1: 玩家2（viewer）摸 T1
-        ['c', 21, 'T'],            # step2: viewer 打 T1 -> 决策点(step1)
+        ['bh', 53, 2],             # step0: 玩家2 补花（轮转仍从 start_player 0 开始）
+        ['bd', 21, 2],             # step1: 玩家2 补摸 T1
+        ['d', 31],                 # step2: 玩家0 摸 B1
+        ['c', 31, 'T'],            # step3: 玩家0 打 B1
+        ['d', 42],                 # step4: 玩家1 摸 F2
+        ['c', 42, 'T'],            # step5: 玩家1 打 F2
+        ['d', 21],                 # step6: 玩家2 摸 T1
+        ['c', 21, 'T'],            # step7: 玩家2 打 T1 -> 决策点(step1, draw=T1)
         ['liuju'],
     ]
     fake = RoundRecord(
@@ -94,7 +100,7 @@ def test_bh_updates_current_to_flower_claimant():
     assert ra.error is None
     assert len(ra.nodes) == 1
     assert ra.nodes[0].seat == 2
-    assert ra.nodes[0].step == 1
+    assert ra.nodes[0].step == 6
     assert ra.nodes[0].actual_tile == 'T1'
 
 # ---------- 吃牌（cl/cm/cr）顺子中间张换算 ----------

@@ -109,10 +109,11 @@ def replay_round(round_rec, viewer):
     agent = FeatureAgent(seat_wind)
     agent.request2obs('Wind %d' % quan)
     hand = [t for t in round_rec.hands[viewer] if not is_flower(t)]
-    if not hand or len(hand) > 13:
-        # 含花起手剔花后 <13 张合法（Deal 已剔花，由 bd 补摸补齐）；>13 或空则数据异常
+    if not hand or len(hand) > 14:
+        # 起手 13（庄家 14）张，剔花后 1..14 均合法（庄家 14 张 = 13+首摸 1，无花时保留 14）；
+        # >14 或空则数据异常
         return RoundAnalysis(round_rec.round_index, viewer, seat_wind, quan, [],
-                             error='viewer%d 起手 %d 张(剔花后), 需要 1..13' % (viewer, len(hand)))
+                             error='viewer%d 起手 %d 张(剔花后), 需要 1..14' % (viewer, len(hand)))
     try:
         agent.request2obs('Deal ' + ' '.join(to_csm(t) for t in hand))
     except Exception as e:
@@ -120,13 +121,14 @@ def replay_round(round_rec, viewer):
                              error='Deal 失败: %r' % e)
 
     nodes = []
-    current = round_rec.start_player_index
+    current = round_rec.start_player_index   # original 域：摸/打轮转按 original id（seat 排列仅映射座位）
     last_discarder = None
     last_discard_tile = None
     pending = None               # 待定决策点: (obs, step, draw_tile) —— 自己摸牌/鸣牌后尚未打牌
+    flower_claimant = None       # 最近 bh 的补花者（original 域），bd 补摸给此人
 
-    def mine():
-        return current == seat_wind
+    def mine(p):
+        return seats[p] == seat_wind if 0 <= p < len(seats) else p == seat_wind
 
     def is_draw_action(a):
         return a in ('d', 'gd', 'bd')
@@ -135,85 +137,91 @@ def replay_round(round_rec, viewer):
         """喂 'Player N Play XX'。自己打牌而 tile 已不在手牌时（补喂时该牌早在
         c 事件移除、或状态漂移/非法流），跳过喂食避免 FeatureAgent 对 p==0
         无条件 hand.remove 崩溃；返回是否实际喂入。"""
-        if player == seat_wind and tile not in agent.hand:
+        if mine(player) and tile not in agent.hand:
             return False
-        agent.request2obs('Player %d Play %s' % (player, tile))
+        agent.request2obs('Player %d Play %s' % (_seat_of(seats, player), tile))
         return True
 
     try:
         for step, tick in enumerate(round_rec.action_ticks):
             a = tick[0]
             if a == 'bh':
+                # 补花不改变摸/打轮转（打牌者由 start_player_index 起轮转），仅记录补花者
                 if len(tick) > 2 and isinstance(tick[2], int):
-                    current = tick[2]   # 补花者成为摸牌者（seat 域，与 start_player_index 同域）
+                    flower_claimant = tick[2]
                 continue
             if is_draw_action(a):
-                if len(tick) > 2 and isinstance(tick[2], int):
-                    current = tick[2]   # bd 可能带 action_player（seat 域，同 bh）
                 tid = tick[1]
                 if is_flower(tid):
                     continue                        # 花牌 Draw 吞掉（bd 才是真实补摸）
                 tile = to_csm(tid)
-                if mine():
+                p = flower_claimant if (a == 'bd' and flower_claimant is not None) else current
+                if mine(p):
                     obs = agent.request2obs('Draw ' + tile)
                     pending = (obs, step, tile)     # 摸牌后待打牌（含摸到的牌）
                 else:
-                    agent.request2obs('Player %d Draw' % current)
+                    agent.request2obs('Player %d Draw' % _seat_of(seats, p))
                 continue
             if a == 'c':
                 tile = to_csm(tick[1])
                 fed = feed_play(current, tile)
-                if mine() and pending is not None and fed:
-                    obs, dstep, draw_tile = pending
-                    po = agent.OFFSET_ACT['Play']
-                    if obs['action_mask'][po:po+34].any():
-                        nodes.append(DiscardNode(
-                            step=dstep, player=viewer, seat=seat_wind,
-                            actual_tile=tile,
-                            hand=[str(t) for t in agent.hand],
-                            melds=[list(m) for m in agent.packs[0]],
-                            river=list(agent.history[0]),
-                            draw=draw_tile,
-                            obs=obs))
-                pending = None
+                if mine(current):
+                    # 只有自己打牌时消费/清空 pending；别人的 c 不清（补花者补摸后
+                    # pending 需保留到轮转回自己打牌）
+                    if pending is not None and fed:
+                        obs, dstep, draw_tile = pending
+                        po = agent.OFFSET_ACT['Play']
+                        if obs['action_mask'][po:po+34].any():
+                            nodes.append(DiscardNode(
+                                step=dstep, player=viewer, seat=seat_wind,
+                                actual_tile=tile,
+                                hand=[str(t) for t in agent.hand],
+                                melds=[list(m) for m in agent.packs[0]],
+                                river=list(agent.history[0]),
+                                draw=draw_tile,
+                                obs=obs))
+                    pending = None
                 last_discarder, last_discard_tile = current, tile
                 current = (current + 1) % 4
                 continue
             if a in ('cl', 'cm', 'cr'):
-                actor = _seat_of(seats, tick[2])
+                actor = tick[2] if 0 <= tick[2] < len(seats) else current
                 if last_discarder is not None:
                     feed_play(last_discarder, last_discard_tile)
                 tile = chi_middle_tile(tick[1], a)
-                obs = agent.request2obs('Player %d Chi %s' % (actor, tile))
+                obs = agent.request2obs('Player %d Chi %s' % (_seat_of(seats, actor), tile))
                 if obs is not None:
                     pending = (obs, step, None)     # 自己吃后待打牌（无摸牌）
                 current = actor
+                last_discarder = last_discard_tile = None
                 continue
             if a == 'p':
-                actor = _seat_of(seats, tick[2])
+                actor = tick[2] if 0 <= tick[2] < len(seats) else current
                 if last_discarder is not None:
                     feed_play(last_discarder, last_discard_tile)
-                obs = agent.request2obs('Player %d Peng' % actor)
+                obs = agent.request2obs('Player %d Peng' % _seat_of(seats, actor))
                 if obs is not None:
                     pending = (obs, step, None)     # 自己碰后待打牌
                 current = actor
+                last_discarder = last_discard_tile = None
                 continue
             if a == 'g':
-                actor = _seat_of(seats, tick[2])
+                actor = tick[2] if 0 <= tick[2] < len(seats) else current
                 if last_discarder is not None:
                     feed_play(last_discarder, last_discard_tile)
-                agent.request2obs('Player %d Gang' % actor)
+                agent.request2obs('Player %d Gang' % _seat_of(seats, actor))
                 current = actor
+                last_discarder = last_discard_tile = None
                 continue
             if a == 'ag':
-                if mine():
-                    agent.request2obs('Player %d AnGang %s' % (current, to_csm(tick[1])))
+                if mine(current):
+                    agent.request2obs('Player %d AnGang %s' % (seat_wind, to_csm(tick[1])))
                 else:
-                    agent.request2obs('Player %d AnGang' % current)
+                    agent.request2obs('Player %d AnGang' % _seat_of(seats, current))
                 pending = None                      # 杠了，没有打牌决策
                 continue
             if a == 'jg':
-                agent.request2obs('Player %d BuGang %s' % (current, to_csm(tick[1])))
+                agent.request2obs('Player %d BuGang %s' % (_seat_of(seats, current), to_csm(tick[1])))
                 pending = None
                 continue
             if a.startswith('hu'):
