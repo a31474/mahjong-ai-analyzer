@@ -605,7 +605,7 @@ def test_missing_weights_raises():
         load_model('tests/fixtures/empty_weights_dir')
 ```
 
-（Step 1 先建 `tests/fixtures/empty_weights_dir/` 空目录）
+（Step 1 先建 `tests/fixtures/empty_weights_dir/.gitkeep`——空目录无法被 git 跟踪；并在 .gitignore 追加 `!backend/weights/README.md`，否则该文件会被 `backend/weights/*` 规则静默忽略）
 
 - [ ] **Step 2: 跑测试确认失败**
 
@@ -679,7 +679,7 @@ Expected: PASS
 - [ ] **Step 6: 提交**
 
 ```bash
-cd ~/project/mahjong-ai-analyzer && git add backend/model_loader.py backend/fetch_weights.sh backend/weights/README.md tests/test_model_loader.py tests/fixtures/empty_weights_dir && git -c user.name="a314" -c user.email="a314@localhost" commit -m "feat: 模型权重加载与 ensemble"
+cd ~/project/mahjong-ai-analyzer && git add backend/model_loader.py backend/fetch_weights.sh backend/weights/README.md tests/test_model_loader.py tests/fixtures/empty_weights_dir .gitignore && git -c user.name="a314" -c user.email="a314@localhost" commit -m "feat: 模型权重加载与 ensemble"
 ```
 
 ---
