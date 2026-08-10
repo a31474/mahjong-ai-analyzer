@@ -66,10 +66,12 @@ touch ~/project/mahjong-ai-analyzer/backend/__init__.py ~/project/mahjong-ai-ana
 
 - [ ] **Step 4: 验证引擎可导入**
 
+`feature.py` 用 Botzone 风格扁平导入（`from agent import`），必须从 engine 目录运行（cwd 即 sys.path[0]）：
+
 ```bash
-cd ~/project/mahjong-ai-analyzer && PYTHONPATH=backend .venv/bin/python -c "
-from engine.feature import FeatureAgent
-from engine.numpy_resfused import NumpyResFused
+cd ~/project/mahjong-ai-analyzer/backend/engine && PYTHONPATH=.. ~/project/mahjong-ai-analyzer/.venv/bin/python -c "
+from feature import FeatureAgent
+from numpy_resfused import NumpyResFused
 a = FeatureAgent(0)
 print('engine ok:', a.OBS_SIZE, a.ACT_SIZE)
 "
