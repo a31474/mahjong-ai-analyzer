@@ -241,6 +241,7 @@ sudo ufw allow 80/tcp && sudo ufw allow 443/tcp
 后端将 salasasa 平台（open_mahjong）的 tick 流逐条喂给 IJCAI 推理引擎，关键约定：
 
 - **花牌剔除**：open_mahjong 花牌 id 51-58（春夏秋冬梅兰竹菊）不计入引擎手牌；起手 `bh`（补花）+ `bd`（补摸）成对处理，`bd` 的补摸者按 `bh` 的补花者确定
+- **花牌打出/不补**：玩家摸切打出花牌（`c` 事件带花）不进引擎仅轮转（无决策点、不崩溃）；玩家起手/摸花不补留在手里时花不进引擎，观测手牌 = 真实手牌的数牌部分（**内容逐张正确**），但观测张数比训练分布少 1 张（正常决策点 14 张、不补花玩家恒 13 张）——规则差异的固有偏差，模型建议基于正确牌型、校准度略降
 - **吃牌中间张**：`cl/cm/cr` 的 tick[1] 是被吃的弃牌，引擎 Chi 需要顺子中间张——`cl` 弃牌是顺子右端（-1）、`cm` 中间（0）、`cr` 左端（+1）；换算后越界（如 `cr` 吃 9 → 10）判为数据异常
 - **player_index 域（原"original 域"）**：牌谱权威约定（`game_record_format.md:60`）——`p*_tiles` 下标与 tick 中玩家字段（`bh`/`bd` 补花补摸者、`cl/cm/cr/p/g` 鸣牌者、`hu` 和牌者）均为**当局 player_index**（门风位）。`seats[original] = player_index` 仅用于 original ↔ player_index 映射：分析视角以 original 标识，重放时经 `seats` 取该玩家的手牌与座位。摸/打轮转按 player_index。
 - **庄家起手 14 张**：`p0_tiles` 恒为庄家 14 张（13 + 首摸 1），剔花后 14 张合法，不做「>13 即异常」误判
