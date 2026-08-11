@@ -282,7 +282,6 @@ PYTHONPATH=backend .venv/bin/pytest tests/ -v
 
 - **单学生模式**：默认三学生 ensemble；环境变量 `ENSEMBLE=1` 时仅加载 `kdens_s0_fp16.npz`（单学生，速度更快、精度略降）
 - **转换失败局/视角跳过**：个别牌谱数据异常（如起手剔花后 >14 张、鸣牌时手牌缺失）会导致该 viewer 转换失败，`prepare` 中标记 `error` 并跳过，不影响其他视角
-- **庄家首打决策点缺失**：庄家起手 14 张（首摸已含）时，首个打牌（首摸后打）无对应 d 事件，无法生成决策点——节点流从庄家的第二个决策点开始
 - **xunmuNodes seats 错位（遗留）**：前端回放引擎（来自 open_mahjong_unity）对 `xunmuNodes` 的 seats 字段存在已知错位 bug，仅影响部分回放视角的座位标注，不影响 AI 分析
 - **补杠（`jg`）不进入手牌流**：`jg`（补杠）事件不产生打牌决策点，仅更新引擎状态
 

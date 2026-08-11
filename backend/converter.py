@@ -127,6 +127,13 @@ def replay_round(round_rec, viewer):
     pending = None               # 待定决策点: (obs, step, draw_tile) —— 自己摸牌/鸣牌后尚未打牌
     flower_claimants = []        # 补花者队列（bh 顺序 append，bd 消费）——多花/交错补花安全
 
+    # 庄家起手 14 张（13 + 跳牌 1，开牌所得无 d 事件）：首打是打牌决策点。
+    # Deal 后直接建立 pending（观测 = 14 张 = Botzone 摸后状态，与训练分布一致）；
+    # step=0（全局首个 c 前），若随后有 bd 补摸会覆盖为更精确的 step。
+    if len(hand) == 14:
+        agent.valid = [agent.OFFSET_ACT['Play'] + agent.OFFSET_TILE[to_csm(t)] for t in set(hand)]
+        pending = (agent._obs(), 0, None)
+
     def mine(p):
         return p == seat_wind
 

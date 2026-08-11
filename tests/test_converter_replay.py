@@ -271,3 +271,35 @@ def test_normalized_tile_id_in_draw_and_discard():
     # 摸 105（万5）后打 105：打牌决策点（实际打的是 W5）
     assert len(ra0.nodes) == 1
     assert ra0.nodes[0].actual_tile == 'W5'
+
+
+def test_dealer_first_discard_is_decision():
+    """庄家起手 14 张（无花）：首打（无 d 事件）也是决策点，观测 14 张。"""
+    from converter import RoundRecord
+    ticks = [['c', 11, 'F'], ['d', 21], ['c', 21, 'T']]
+    dealer14 = [11, 12, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25]
+    fake = RoundRecord(
+        round_index=1, current_round=1, seats=[0, 1, 2, 3], dealer_index=0,
+        start_player_index=0,
+        hands=[dealer14, [31] * 13, [41] * 13, [21] * 13], action_ticks=ticks)
+    ra = replay_round(fake, viewer=0)
+    assert ra.error is None
+    assert len(ra.nodes) == 1
+    n0 = ra.nodes[0]
+    assert n0.step == 0 and n0.actual_tile == 'W1'
+    import numpy as np
+    o = n0.obs['observation']
+    assert int((o[2:6, :, :] > 0).sum()) == 14     # 观测 14 张（Botzone 摸后状态）
+
+def test_dealer_with_flower_buys_pending_via_bd():
+    """庄家起手含花（补花）时：bd 补摸覆盖初始 pending，首打节点 step=bd 下标。"""
+    from converter import RoundRecord
+    ticks = [['bh', 51, 0], ['bd', 21, 0], ['c', 11, 'F']]
+    fake = RoundRecord(
+        round_index=1, current_round=1, seats=[0, 1, 2, 3], dealer_index=0,
+        start_player_index=0,
+        hands=[[11] * 13 + [51], [21] * 13, [31] * 13, [41] * 13], action_ticks=ticks)
+    ra = replay_round(fake, viewer=0)
+    assert ra.error is None
+    assert len(ra.nodes) == 1
+    assert ra.nodes[0].step == 1 and ra.nodes[0].actual_tile == 'W1'
