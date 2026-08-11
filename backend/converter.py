@@ -153,7 +153,16 @@ def replay_round(round_rec, viewer):
             if is_draw_action(a):
                 tid = tick[1]
                 if is_flower(tid):
-                    continue                        # 花牌 Draw 吞掉（bd 才是真实补摸）
+                    # 花牌 Draw 吞掉（bd 才是真实补摸）。但摸花后玩家仍要打一张牌——
+                    # 若是不补花而打手牌数牌，该次打牌是打牌决策点，需建立 pending
+                    # （观测 = 当前 13 张数牌手牌，与真实数牌一致）。
+                    # valid 手动构造：摸花后只能打手牌（花非成和张，不能胡；杠需摸牌时机，
+                    # 此处不展开）——Play 合法集 = 手牌去重即可。
+                    if mine(current) and a in ('d', 'gd'):
+                        agent.valid = [agent.OFFSET_ACT['Play'] + agent.OFFSET_TILE[t]
+                                       for t in set(agent.hand)]
+                        pending = (agent._obs(), step, None)
+                    continue
                 tile = to_csm(tid)
                 p = flower_claimant if (a == 'bd' and flower_claimant is not None) else current
                 if mine(p):

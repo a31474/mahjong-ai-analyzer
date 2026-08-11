@@ -221,3 +221,22 @@ def test_flower_discard_does_not_crash():
     assert ra1.error is None
     assert len(ra1.nodes) == 1
     assert ra1.nodes[0].actual_tile == 'T1'
+
+
+def test_flower_kept_then_discard_numeral_is_decision():
+    """摸花不补、随后打手牌数牌：该次打牌是决策点（观测=13 张数牌）。"""
+    from converter import RoundRecord
+    ticks = [['d', 53], ['c', 11, 'F'], ['d', 21], ['c', 21, 'T']]
+    fake = RoundRecord(
+        round_index=1, current_round=1, seats=[0, 1, 2, 3], dealer_index=0,
+        start_player_index=0,
+        hands=[[11] * 13, [21] * 13, [31] * 13, [41] * 13], action_ticks=ticks)
+    ra = replay_round(fake, viewer=0)
+    assert ra.error is None
+    assert len(ra.nodes) == 1
+    n0 = ra.nodes[0]
+    assert n0.step == 0 and n0.actual_tile == 'W1'   # 摸花后打 W1（决策点，draw=None）
+    assert n0.draw is None
+    ra1 = replay_round(fake, viewer=1)
+    assert len(ra1.nodes) == 1
+    assert ra1.nodes[0].actual_tile == 'T1'          # player 1 正常摸打
