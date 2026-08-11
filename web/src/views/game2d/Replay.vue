@@ -29,7 +29,8 @@
                 :class="{ 'is-best': index === 0 }"
               >
                 <span class="ai-panel__tile">
-                  <img :src="mmcrTileAsset(aiTileToMmcr(entry.tile))" :alt="aiTileLabel(entry.tile)" />
+                  <img v-if="aiTileToMmcr(entry.tile) > 0" :src="mmcrTileAsset(aiTileToMmcr(entry.tile))" :alt="aiTileLabel(entry.tile)" />
+                  <span v-else class="ai-panel__tile-empty" />
                 </span>
                 <span class="ai-panel__bar">
                   <i :style="{ width: `${Math.round(entry.prob * 100)}%` }" />
@@ -40,7 +41,8 @@
             <div class="ai-panel__actual" :class="aiData.agree ? 'is-agree' : 'is-disagree'">
               <span>实际打出</span>
               <span class="ai-panel__tile">
-                <img :src="mmcrTileAsset(aiTileToMmcr(aiData.actual_tile))" :alt="aiTileLabel(aiData.actual_tile)" />
+                <img v-if="aiTileToMmcr(aiData.actual_tile) > 0" :src="mmcrTileAsset(aiTileToMmcr(aiData.actual_tile))" :alt="aiTileLabel(aiData.actual_tile)" />
+                <span v-else class="ai-panel__tile-empty" />
               </span>
               <em>{{ aiData.agree ? '与 AI 一致' : '与 AI 分歧' }}</em>
             </div>

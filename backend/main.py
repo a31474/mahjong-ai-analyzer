@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import re
 import uuid
 from collections import OrderedDict
 from fastapi import FastAPI, HTTPException
@@ -31,23 +32,23 @@ _STEP_DISK = DiskCache(_CACHE_DIR)                                  # 单步分�
 _RECORD_DISK = DiskCache(os.path.join(_CACHE_DIR, 'record'), file_cap=200)  # 牌谱原始 JSON
 
 def _record_cache_key(record, game_id):
-    """持久化缓存键：game_id 路径直接用 game_id；上传路径用 record 内容 sha1
-    （多个上传牌谱的 game_id 可能都是 'upload'，不能作键）。"""
+    """持久化缓存键：game_id 路径加 'gid:' 前缀（防与上传 sha1 键碰撞）；上传路径用内容 sha1。"""
     if game_id and game_id != 'upload':
-        return game_id
+        return 'gid:' + game_id
     return 'sha1:' + hashlib.sha1(
         json.dumps(record, sort_keys=True, ensure_ascii=False).encode('utf-8')
     ).hexdigest()
 
 def _load_record(game_id, platform):
     """牌谱磁盘缓存：命中直接返回（跳过平台拉取），未命中拉取并存盘。"""
-    hit = _RECORD_DISK.get(game_id)
+    key = 'gid:' + game_id
+    hit = _RECORD_DISK.get(key)
     if hit is not None:
         return hit
     fetched = fetch_record(game_id, platform)
     entry = {'record': fetched['record'], 'players': fetched['players'],
              'rule': fetched.get('rule')}
-    _RECORD_DISK.put(game_id, entry)
+    _RECORD_DISK.put(key, entry)
     return entry
 
 def _get_model():
@@ -77,17 +78,23 @@ def api_prepare(body: PrepareBody):
         if 'record' not in body.record and 'game_round' not in body.record:
             raise HTTPException(status_code=400, detail='record 字段需为牌谱 JSON')
         record = body.record.get('record', body.record)
-        # 上传路径也入盘（键 = 内容 sha1）：重启后同一牌谱再次上传免解析
+        # 上传路径也入盘（键 = 内容 sha1）：重启后同一牌谱再次上传免解析；
+        # 写盘失败仅降级（不阻断 200 响应）
         ckey = _record_cache_key(record, game_id)
-        _RECORD_DISK.put(ckey, {'record': record, 'players': players, 'rule': rule})
+        try:
+            _RECORD_DISK.put(ckey, {'record': record, 'players': players, 'rule': rule})
+        except Exception:
+            pass
     elif body.game_id:
+        if not re.fullmatch(r'[A-Za-z0-9_-]{1,64}', body.game_id):
+            raise HTTPException(status_code=400, detail='非法 game_id（仅字母数字_-）')
         try:
             entry = _load_record(body.game_id, body.platform)   # 磁盘缓存优先，未命中拉取
         except Exception as e:
             raise HTTPException(status_code=502, detail='拉取牌谱失败: %r' % e)
         record = entry['record']
         game_id = body.game_id
-        players = entry['players']
+        players = entry.get('players') or []
         rule = entry.get('rule')
     else:
         raise HTTPException(status_code=400, detail='需要 game_id 或 record')

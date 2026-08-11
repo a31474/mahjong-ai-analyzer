@@ -1,7 +1,8 @@
 import urllib.request, urllib.error, json
+from urllib.parse import quote
 
 def fetch_record(game_id, platform='https://salasasa.cn'):
-    url = '%s/api/platform/record/%s' % (platform.rstrip('/'), game_id)
+    url = '%s/api/platform/record/%s' % (platform.rstrip('/'), quote(game_id, safe=''))
     try:
         with urllib.request.urlopen(url, timeout=30) as resp:
             data = json.loads(resp.read().decode('utf-8'))

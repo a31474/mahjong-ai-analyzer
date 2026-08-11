@@ -10,7 +10,14 @@ HONOR_CSM = {45: 'J1', 46: 'J3', 47: 'J2'}
 def is_flower(tile_id: int) -> bool:
     return tile_id in FLOWER_IDS
 
+def _normalize(tile_id: int) -> int:
+    """归一化 id（≥100，赤五编码：105=万5/205=筒5/305=索5）转标准 id（15/25/35）。"""
+    if tile_id >= 100:
+        return (tile_id // 100) * 10 + tile_id % 100
+    return tile_id
+
 def to_csm(tile_id: int) -> str:
+    tile_id = _normalize(tile_id)
     if is_flower(tile_id):
         raise ValueError('flower tile %d is excluded from CSM view' % tile_id)
     if tile_id in HONOR_CSM:

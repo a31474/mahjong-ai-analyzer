@@ -92,3 +92,12 @@ def test_record_disk_cache_skips_fetch(monkeypatch, tmp_path):
     r2 = client.post('/api/analyze/prepare', json={'game_id': 'abc123XYZ'})
     assert r2.status_code == 200
     assert calls == ['abc123XYZ']    # 未再拉取
+
+
+def test_game_id_injection_rejected():
+    """非法 game_id（路径注入）返回 400。"""
+    client = TestClient(main.app)
+    r = client.post('/api/analyze/prepare', json={'game_id': '../admin'})
+    assert r.status_code == 400
+    r2 = client.post('/api/analyze/prepare', json={'game_id': 'a b'})
+    assert r2.status_code == 400

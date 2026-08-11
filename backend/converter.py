@@ -125,7 +125,7 @@ def replay_round(round_rec, viewer):
     last_discard_tile = None
     last_fed = None              # 最近一次成功喂入的 (player, tile)
     pending = None               # 待定决策点: (obs, step, draw_tile) —— 自己摸牌/鸣牌后尚未打牌
-    flower_claimant = None       # 最近 bh 的补花者（player_index 域），bd 补摸给此人
+    flower_claimants = []        # 补花者队列（bh 顺序 append，bd 消费）——多花/交错补花安全
 
     def mine(p):
         return p == seat_wind
@@ -148,7 +148,7 @@ def replay_round(round_rec, viewer):
             if a == 'bh':
                 # 补花不改变摸/打轮转（打牌者由 start_player_index 起轮转），仅记录补花者
                 if len(tick) > 2 and isinstance(tick[2], int):
-                    flower_claimant = tick[2]
+                    flower_claimants.append(tick[2])
                 continue
             if is_draw_action(a):
                 tid = tick[1]
@@ -164,7 +164,16 @@ def replay_round(round_rec, viewer):
                         pending = (agent._obs(), step, None)
                     continue
                 tile = to_csm(tid)
-                p = flower_claimant if (a == 'bd' and flower_claimant is not None) else current
+                if a == 'bd':
+                    # bd 优先用自身 tick[2]（若存在），否则消费补花者队列
+                    if len(tick) > 2 and isinstance(tick[2], int):
+                        p = tick[2]
+                    elif flower_claimants:
+                        p = flower_claimants.pop(0)
+                    else:
+                        p = current
+                else:
+                    p = current
                 if mine(p):
                     obs = agent.request2obs('Draw ' + tile)
                     pending = (obs, step, tile)     # 摸牌后待打牌（含摸到的牌）
@@ -177,7 +186,7 @@ def replay_round(round_rec, viewer):
                     # 花牌打出（可摸切/手切）：花不进引擎（IJCAI 牌墙 136 无花），
                     # 牌河无吃碰杠可能，仅轮转；防御性清 pending（摸花本就吞掉）。
                     pending = None
-                    last_discarder, last_discard_tile = current, tid
+                    last_discarder, last_discard_tile = None, None   # 花不进入鸣牌配对链
                     current = (current + 1) % 4
                     continue
                 tile = to_csm(tid)
@@ -206,7 +215,10 @@ def replay_round(round_rec, viewer):
             if a in ('cl', 'cm', 'cr'):
                 actor = tick[2] if 0 <= tick[2] < len(seats) else current
                 if last_discarder is not None and last_fed != (last_discarder, last_discard_tile):
-                    feed_play(last_discarder, last_discard_tile)
+                    # 状态漂移防御：补喂失败（弃牌不在手牌等）说明事件流已不一致，
+                    # 继续喂会拿过期 curTile 错乱，显式走 error 路径
+                    if not feed_play(last_discarder, last_discard_tile):
+                        raise ValueError('鸣牌前弃牌喂入失败（状态漂移）: %s' % (last_discard_tile,))
                 tile = chi_middle_tile(tick[1], a)
                 obs = agent.request2obs('Player %d Chi %s' % (actor, tile))
                 if obs is not None:
@@ -217,7 +229,10 @@ def replay_round(round_rec, viewer):
             if a == 'p':
                 actor = tick[2] if 0 <= tick[2] < len(seats) else current
                 if last_discarder is not None and last_fed != (last_discarder, last_discard_tile):
-                    feed_play(last_discarder, last_discard_tile)
+                    # 状态漂移防御：补喂失败（弃牌不在手牌等）说明事件流已不一致，
+                    # 继续喂会拿过期 curTile 错乱，显式走 error 路径
+                    if not feed_play(last_discarder, last_discard_tile):
+                        raise ValueError('鸣牌前弃牌喂入失败（状态漂移）: %s' % (last_discard_tile,))
                 obs = agent.request2obs('Player %d Peng' % actor)
                 if obs is not None:
                     pending = (obs, step, None)     # 自己碰后待打牌
@@ -227,7 +242,10 @@ def replay_round(round_rec, viewer):
             if a == 'g':
                 actor = tick[2] if 0 <= tick[2] < len(seats) else current
                 if last_discarder is not None and last_fed != (last_discarder, last_discard_tile):
-                    feed_play(last_discarder, last_discard_tile)
+                    # 状态漂移防御：补喂失败（弃牌不在手牌等）说明事件流已不一致，
+                    # 继续喂会拿过期 curTile 错乱，显式走 error 路径
+                    if not feed_play(last_discarder, last_discard_tile):
+                        raise ValueError('鸣牌前弃牌喂入失败（状态漂移）: %s' % (last_discard_tile,))
                 agent.request2obs('Player %d Gang' % actor)
                 current = actor
                 last_discarder = last_discard_tile = None
@@ -244,6 +262,10 @@ def replay_round(round_rec, viewer):
                 pending = None
                 continue
             if a.startswith('hu'):
+                # 错和（fan 列表含「错和」）不是局终点：玩家失去和牌权、对局继续
+                # （前端 isCuoheTick 同约定）；不喂 Hu、不 break。
+                if len(tick) > 3 and isinstance(tick[3], list) and '错和' in tick[3]:
+                    continue
                 if len(tick) > 1 and isinstance(tick[1], int):
                     # tick[1] = hepai_player_index（player_index 域，真实牌谱验证）
                     agent.request2obs('Player %d Hu' % tick[1])

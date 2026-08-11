@@ -240,3 +240,34 @@ def test_flower_kept_then_discard_numeral_is_decision():
     ra1 = replay_round(fake, viewer=1)
     assert len(ra1.nodes) == 1
     assert ra1.nodes[0].actual_tile == 'T1'          # player 1 正常摸打
+
+
+def test_cuohe_round_continues():
+    """错和（fan 含「错和」）不是局终点：对局继续，后续决策点保留。"""
+    from converter import RoundRecord
+    ticks = [['d', 21], ['c', 21, 'T'], ['d', 19], ['c', 19, 'T'],
+             ['hu_first', 1, 0, ['错和'], [0, 0, 0, 0]],
+             ['d', 22], ['c', 22, 'T'], ['d', 23], ['c', 23, 'T']]
+    fake = RoundRecord(
+        round_index=1, current_round=1, seats=[0, 1, 2, 3], dealer_index=0,
+        start_player_index=0,
+        hands=[[11] * 13, [21] * 13, [31] * 13, [41] * 13], action_ticks=ticks)
+    # 错和者 player1（原应和牌者），对局继续：player2/player3 的摸打保留
+    ra2 = replay_round(fake, viewer=2)
+    assert ra2.error is None
+    assert len(ra2.nodes) == 1            # player2 打 22 的决策点（错和后续）
+    assert ra2.nodes[0].actual_tile == 'T2'
+
+def test_normalized_tile_id_in_draw_and_discard():
+    """归一化 id（≥100，赤五）在 d/c 事件中不崩溃（105→15 万5）。"""
+    from converter import RoundRecord
+    ticks = [['d', 105], ['c', 105, 'T'], ['d', 11], ['c', 11, 'T']]
+    fake = RoundRecord(
+        round_index=1, current_round=1, seats=[0, 1, 2, 3], dealer_index=0,
+        start_player_index=0,
+        hands=[[11] * 13, [21] * 13, [31] * 13, [41] * 13], action_ticks=ticks)
+    ra0 = replay_round(fake, viewer=0)
+    assert ra0.error is None
+    # 摸 105（万5）后打 105：打牌决策点（实际打的是 W5）
+    assert len(ra0.nodes) == 1
+    assert ra0.nodes[0].actual_tile == 'W5'
