@@ -203,3 +203,21 @@ def test_meld_branch_no_duplicate_discard_feed():
     w9 = 8                                    # OFFSET_TILE['W9']（W1 起 0..8）
     disc = obs[6 + 4 * 1: 6 + 4 * 1 + 4, :, w9]  # DISCARD 平面 6 起，玩家1 相对座位 p=1
     assert int(disc.sum()) == 1
+
+
+def test_flower_discard_does_not_crash():
+    """玩家摸切打出花牌：不崩溃、不产生决策点、轮转继续。"""
+    from converter import RoundRecord
+    ticks = [['d', 53], ['c', 53, 'T'], ['d', 21], ['c', 21, 'T']]
+    fake = RoundRecord(
+        round_index=1, current_round=1, seats=[0, 1, 2, 3], dealer_index=0,
+        start_player_index=0,
+        hands=[[11] * 13, [21] * 13, [31] * 13, [41] * 13], action_ticks=ticks)
+    # viewer 0 摸切花牌（无决策点）；player 1 随后摸打 21 是决策点
+    ra0 = replay_round(fake, viewer=0)
+    assert ra0.error is None
+    assert ra0.nodes == []
+    ra1 = replay_round(fake, viewer=1)
+    assert ra1.error is None
+    assert len(ra1.nodes) == 1
+    assert ra1.nodes[0].actual_tile == 'T1'

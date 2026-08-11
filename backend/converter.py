@@ -163,7 +163,15 @@ def replay_round(round_rec, viewer):
                     agent.request2obs('Player %d Draw' % p)
                 continue
             if a == 'c':
-                tile = to_csm(tick[1])
+                tid = tick[1]
+                if is_flower(tid):
+                    # 花牌打出（可摸切/手切）：花不进引擎（IJCAI 牌墙 136 无花），
+                    # 牌河无吃碰杠可能，仅轮转；防御性清 pending（摸花本就吞掉）。
+                    pending = None
+                    last_discarder, last_discard_tile = current, tid
+                    current = (current + 1) % 4
+                    continue
+                tile = to_csm(tid)
                 fed = feed_play(current, tile)
                 if fed:
                     last_fed = (current, tile)
