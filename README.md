@@ -36,6 +36,9 @@
 - `backend/analyzer.py`：prepare（转换全部回合/视角）+ analyze_step（单节点推理，LRU 缓存）
 - `backend/model_loader.py`：三学生 ensemble 加载（`ENSEMBLE=1` 时单学生）
 - `web/`：Vue 3 + PixiJS 前端（回放引擎来自 open_mahjong_unity）
+  - 2D 回放界面已同步上游 `open_mahjong_unity` 提交 `4db27ac0`（dev ver 0.4.76.6，2026-09-17）：`web/src/game2d/`、`web/src/views/game2d/`、`web/src/constants/`、`web/src/i18n/`、`web/public/game2d-assets/`
+  - 本地定制（上游同步时保留）：`web/src/game2d/ai/api.ts`（AI 接口）、`Replay.vue` 的 AI 复盘面板与牌谱输入页、`salasasa/api.ts` 精简（去掉站点登录相关接口）、`replay/recordReplay.ts` 的最终分缺失兜底
+  - 未同步的上游改动：`@/utils/localGameRecordStore`（Unity 客户端本地牌谱库）与 `@/utils/recordShareLink`（站点 2D/3D 分享链接）相关逻辑——本服务无对应页面与存储，保留原有加载/分享实现
 
 ## 运行步骤
 
@@ -288,7 +291,7 @@ PYTHONPATH=backend .venv/bin/pytest tests/ -v
 ## 许可与出处
 
 - `backend/engine/`：来自 IJCAI-mahjong 竞赛代码（mcr-ai/IJCAI-mahjong/deploy/caiest_cnn），**无 LICENSE**，仅作研究用途
-- `web/src/game2d/`：回放渲染引擎来自 `open_mahjong_unity`（前端），MIT 许可
+- `web/src/game2d/`、`web/src/views/game2d/`、`web/public/game2d-assets/`：2D 回放界面来自 `open_mahjong_unity`（前端），MIT 许可；同步基线 `cbd226d7`（dev ver 0.4.75.7），当前同步至 `4db27ac0`（dev ver 0.4.76.6）
 - `web/public/game2d-assets/`：音效/贴图资产，见 `game2d-assets/sounds/ATTRIBUTION.md`
 - 模型权重 `backend/weights/*.npz`：来自 HuggingFace `Dannibal/ijcai-mahjong-ckpts-2026`（champion/ 目录，IJCAI-2026 亚军 bot kdens3），见 `backend/weights/README.md`；权重不入库，需 `bash backend/fetch_weights.sh` 下载
 - 牌谱数据：salasasa.cn 平台公开对局
