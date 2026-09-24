@@ -21,6 +21,7 @@ import {
 } from '../fontLoader'
 import { FROM_DRAWN_TINT, Tile } from './Tile'
 import { River } from './River'
+import { RiverMatchHighlight } from './RiverMatchHighlight'
 import { WaitDisplay, type WaitInfoData } from './WaitDisplay'
 import { Hand } from './Hand'
 import { Display, Countdown, DirLabel, TempLabel, TenpaiTipButton } from './Display'
@@ -40,7 +41,6 @@ export type { WaitInfoData, AssistSettings }
 const DUANG_CUTOFF = 32
 const AUTO_WIN_DELAY_MS = 1600
 const AUTO_DISCARD_DELAY_MS = 500
-const PASS_DEBOUNCE_MS = 200
 
 type ViewerSyncContext = {
   category: string
@@ -72,6 +72,9 @@ function readCurrentPlayer(state: Record<string, any>): number | null {
 
 function readWaitingDiscarderSeat(snapshot: ActiveSessionSnapshot): number | null {
   const state = snapshot.state as Record<string, any>
+  if (typeof state.last_discarder === 'number' && state.last_discarder >= 0) {
+    return state.last_discarder
+  }
   const lastEventKind = typeof state.last_event_kind === 'string' ? state.last_event_kind : null
   if (lastEventKind === 'discard_tile' && typeof state.last_actor === 'number') {
     return state.last_actor
@@ -117,6 +120,7 @@ export class MahjongScene {
   private waitDisplay!: WaitDisplay
   private rivers!: [River, River, River, River]
   private hands!: [Hand, Hand, Hand, Hand]
+  private readonly riverMatchHighlight = new RiverMatchHighlight()
   private stateDisplay!: Display
   private tempDisplay!: Display
   private volDisplay!: Display
@@ -144,9 +148,7 @@ export class MahjongScene {
   private currentViewerActions: Array<Record<string, any>> = []
   private currentPendingStatus = 'none'
   private inputEnabled = false
-  private pendingPassAckStageCounter: number | null = null
   private openingReplacementTile: Tile | null = null
-  private lastPassAttemptAtMs = 0
   private roundEnded = false
   private scoreDifferenceVisible = false
   private scoreDifferenceTimeout: ReturnType<typeof setTimeout> | null = null
@@ -162,6 +164,7 @@ export class MahjongScene {
   }
   setAssistSettings(next: Partial<AssistSettings> | AssistSettings): void {
     this.assist = normalizeAssistSettings({ ...this.assist, ...next })
+    this.hands[0]?.setDiscardConfirmationRequired(this.assist.confirmDiscard)
   }
 
   // ── Interactive state ─────────────────────────────────────────────
@@ -189,10 +192,7 @@ export class MahjongScene {
 
   // ── Resize ────────────────────────────────────────────────────────
   private resizeFrame: number | null = null
-  /** 当前垂直滑动偏移（加到 center.y 上，正=向下）。 */
-  private currentSlide = 0
-  /** 每次 layout 重新计算的 center.y 基准值。 */
-  private baseCenterY = 0
+  private resizeObserver: ResizeObserver | null = null
   private pendingChoicesTimeout: ReturnType<typeof setTimeout> | null = null
   private autoActionTimeout: ReturnType<typeof setTimeout> | null = null
   private predrawSortTimeout: ReturnType<typeof setTimeout> | null = null
@@ -381,6 +381,10 @@ export class MahjongScene {
     hostElement.replaceChildren(this.app.canvas)
     this.layout()
     window.addEventListener('resize', this.handleResize)
+    if (typeof ResizeObserver !== 'undefined') {
+      this.resizeObserver = new ResizeObserver(() => this.scheduleResizeAndLayout())
+      this.resizeObserver.observe(hostElement)
+    }
 
     this.createSubComponents()
     this.mounted = true
@@ -416,7 +420,6 @@ export class MahjongScene {
   destroy(): void {
     this.destroyed = true
     this.mountGeneration += 1
-    this.pendingPassAckStageCounter = null
     if (this.resizeFrame !== null) {
       window.cancelAnimationFrame(this.resizeFrame)
       this.resizeFrame = null
@@ -427,6 +430,8 @@ export class MahjongScene {
     this.clearScoreDifferenceTimeout()
     this.stopLatencyMeasurement()
     window.removeEventListener('resize', this.handleResize)
+    this.resizeObserver?.disconnect()
+    this.resizeObserver = null
     document.removeEventListener('contextmenu', this.handleRightClick)
     document.removeEventListener('pointerdown', this.handleLeftDoubleClickShortcut)
     document.removeEventListener('wheel', this.handleWheel)
@@ -539,7 +544,6 @@ export class MahjongScene {
   suspendForVote(): void {
     this.currentPendingStatus = 'none'
     this.currentViewerActions = []
-    this.pendingPassAckStageCounter = null
     this.clearPendingChoicesTimeout()
     this.clearAutoActionTimeout()
     this.clearMeldChoices()
@@ -700,9 +704,12 @@ export class MahjongScene {
 
   private rememberViewer(viewer: Record<string, any>): void {
     this.currentPendingStatus = typeof viewer.pending === 'string' ? viewer.pending : 'none'
-    this.currentViewerActions = Array.isArray(viewer.available_actions)
+    const incoming = Array.isArray(viewer.available_actions)
       ? viewer.available_actions as Array<Record<string, any>>
       : []
+    this.currentViewerActions = this.appearance.forcePassEnabled
+      ? incoming
+      : incoming.filter((action) => action.kind !== 'force_pass')
   }
 
   private canAct(): boolean {
@@ -714,29 +721,37 @@ export class MahjongScene {
   }
 
   private sendGameInput(payload: Record<string, unknown>): void {
-    if (this.currentStageCounter <= 0) return
+    if (this.currentStageCounter <= 0 || !this.canAct() || !this.hasAction(String(payload.kind))) return
+    // Salasasa consumes this ask on submission and does not send pass_ack.
+    // Clear before sending so a bubbling pointer event cannot submit a second
+    // action (for example chow followed by the double-click pass shortcut).
+    this.clearViewerDecision()
     this.sendToServer('game.input', {
       ...payload,
       stage_counter: this.currentStageCounter,
     })
   }
 
-  private requestPassAction(applyDebounce: boolean = true): void {
-    const now = Date.now()
-    if (this.currentStageCounter <= 0) return
-    if (applyDebounce && now - this.lastPassAttemptAtMs < PASS_DEBOUNCE_MS) return
-    this.lastPassAttemptAtMs = now
-    this.pendingPassAckStageCounter = this.currentStageCounter
+  private requestPassAction(): void {
+    // A tactical recheck is a new ask and may be answered immediately.
     this.sendGameInput({ kind: 'pass' })
+  }
+
+  private clearViewerDecision(): void {
+    this.currentPendingStatus = 'none'
+    this.currentViewerActions = []
+    this.clearPendingChoicesTimeout()
+    this.clearAutoActionTimeout()
+    this.clearMeldChoices()
+    this.countdown.stop()
+    this.hands[0].unwaitDiscard()
   }
 
   private syncDecisionTimer(viewer: Record<string, any>): void {
     const dt = typeof viewer.decision_timer_ms === 'number' ? viewer.decision_timer_ms : null
     if (this.canAct() && dt !== null && dt > 0) {
       this.countdown.onExpire = () => {
-        this.inputEnabled = false
-        this.clearMeldChoices()
-        this.hands[0].unwaitDiscard()
+        this.clearViewerDecision()
       }
       this.countdown.setTimeMillis(dt, this.currentStageCounter)
       this.countdown.visible = true
@@ -833,7 +848,7 @@ export class MahjongScene {
       this.clearMeldChoices()
       this.hands[0].unwaitDiscard()
       this.waitDisplay.visible = false
-      this.requestPassAction(false)
+      this.requestPassAction()
       return true
     }
     this.clearAutoActionTimeout()
@@ -841,13 +856,18 @@ export class MahjongScene {
     this.clearMeldChoices()
     this.hands[0].unwaitDiscard()
     this.waitDisplay.visible = false
+    this.sendViewerAction(action)
+    return true
+  }
+
+  private sendViewerAction(action: Record<string, any>): void {
     this.sendGameInput({
       kind: action.kind,
       tile: action.tile,
       use_drawn_tile: action.use_drawn_tile,
       ui64_value: action.ui64_value,
+      server_action: action.server_action,
     })
-    return true
   }
 
   private scheduleAutoWinAction(action: Record<string, any>): boolean {
@@ -896,7 +916,7 @@ export class MahjongScene {
       return this.triggerAutoAction(passAction)
     }
 
-    // 3) 自动和牌（受不点和 / 不抢杠 / 不自摸 / 选中牌不自动自摸 约束）
+    // 3) 自动和牌。抢杠和不得当作点和：否则「不点和」会跳过自动和并在下一步把和牌 pass 掉。
     if (this.assist.autoWin) {
       if (claimRobAction && !this.assist.noRobKong) {
         return this.scheduleAutoWinAction(claimRobAction)
@@ -968,12 +988,14 @@ export class MahjongScene {
 
   /** Remaining non-pass actions after 不吃/不碰/不明杠/不点和 filters. */
   private remainingActionsAfterMeldFilter(): Array<Record<string, any>> {
-    const actions = this.currentViewerActions.filter((action) => action.kind !== 'pass' && action.kind !== 'final_pass')
+    const actions = this.currentViewerActions.filter((action) => (
+      action.kind !== 'pass' && action.kind !== 'final_pass' && action.kind !== 'force_pass'
+    ))
     return actions.filter((action) => {
       if (this.assist.passChi && action.kind === 'chow') return false
       if (this.assist.passPeng && action.kind === 'pung') return false
       if (this.assist.passMingGang && action.kind === 'melded_kong') return false
-      // 不点和仅剔除 discard_win；不抢杠/不自摸不参与自动过牌筛除（对齐 Unity）。
+      // 不点和仅剔除 discard_win；抢杠和 / 不抢杠 / 不自摸不参与自动过牌筛除。
       if (this.shouldFilterRonForAutoPass() && action.kind === 'discard_win') return false
       return true
     })
@@ -989,11 +1011,14 @@ export class MahjongScene {
   /** Unity ShouldFilterRonForAutoPass: 不点和 removes ron unless another unblocked meld remains. */
   private shouldFilterRonForAutoPass(): boolean {
     if (!this.assist.noRon || !this.hasAction('discard_win')) return false
+    if (this.hasAction('rob_added_kong_win')) return false
     return !this.hasUnblockedMeldOption()
   }
 
   private shouldAutoPassAfterMeldFilter(): boolean {
-    const offered = this.currentViewerActions.some((action) => action.kind !== 'pass' && action.kind !== 'final_pass')
+    const offered = this.currentViewerActions.some((action) => (
+      action.kind !== 'pass' && action.kind !== 'final_pass' && action.kind !== 'force_pass'
+    ))
     if (!offered) return false
     return this.remainingActionsAfterMeldFilter().length === 0
   }
@@ -1030,7 +1055,7 @@ export class MahjongScene {
           tile: tid,
           use_drawn_tile: useDrawn,
         })
-      })
+      }, this.assist.confirmDiscard)
     } else {
       this.hands[0].unwaitDiscard()
     }
@@ -1087,21 +1112,6 @@ export class MahjongScene {
 
     this.syncDecisionTimer(viewer)
     this.applyViewerInteractions(reactionTile, context)
-  }
-
-  handlePassAck(payload: { stage_counter?: number | null }): void {
-    if (!this.mounted) return
-    const stageCounter = typeof payload.stage_counter === 'number' ? payload.stage_counter : null
-    if (stageCounter === null || stageCounter !== this.currentStageCounter) return
-    if (this.pendingPassAckStageCounter !== stageCounter) return
-
-    this.pendingPassAckStageCounter = null
-    this.currentPendingStatus = 'slept'
-    this.currentViewerActions = []
-    this.inputEnabled = false
-    this.countdown.stop()
-    this.clearMeldChoices()
-    this.hands[0].unwaitDiscard()
   }
 
   showRatingUpdate(message: string): void {
@@ -1168,8 +1178,6 @@ export class MahjongScene {
     this.redrawBackground()
     this.layoutBackgroundImage()
     this.layout()
-    // 尺寸变化后按新的可视范围重新夹紧滑动偏移
-    this.setVerticalSlide(this.currentSlide)
   }
 
   private redrawBackground(): void {
@@ -1313,13 +1321,18 @@ export class MahjongScene {
 
     if (isMobile.any) {
       if (sw > sh) {
-        this.center.x = sh / 2 + 1.4 * TILE_HEIGHT * sh * WINDOW_SCALE / SCALE_FACTOR
+        // 宽高比被压缩成“横条”时保持牌桌正立（不旋转 90°），按高度缩放并居中，
+        // 修复长宽被特殊压缩时牌桌逆时针旋转的问题
+        this.center.x = sw / 2
         this.center.y = sh / 2
-        this.center.rotation = -Math.PI / 2
+        this.center.rotation = 0
         this.center.scale.set(sh * WINDOW_SCALE / SCALE_FACTOR)
       } else {
         this.center.x = sw / 2
-        this.center.y = sw / 2 + 1.4 * TILE_HEIGHT * sw * WINDOW_SCALE / SCALE_FACTOR
+        // 手机竖屏会给牌桌上下各预留独立空间：上方放辅助操作按钮，
+        // 下方完整展示出牌辅助方块。牌桌本体因此应在加长后的舞台内垂直居中。
+        const topSpaceReduction = Math.min(52, Math.max(0, (sh - sw) / 4))
+        this.center.y = sh / 2 - topSpaceReduction
         this.center.rotation = 0
         this.center.scale.set(sw * WINDOW_SCALE / SCALE_FACTOR)
       }
@@ -1330,12 +1343,6 @@ export class MahjongScene {
       this.center.scale.set(Math.min(sw, sh) * WINDOW_SCALE / SCALE_FACTOR)
     }
 
-    // 竖屏手机才允许垂直滑动；横屏/桌面回到基准位置
-    if (!isMobile.any || sw > sh) {
-      this.currentSlide = 0
-    }
-    this.baseCenterY = this.center.y
-    this.center.y = this.baseCenterY + this.currentSlide
   }
 
   private getViewportSize(): { width: number; height: number } {
@@ -1360,7 +1367,14 @@ export class MahjongScene {
   }
 
   private createHand(direction: number, parent: Container, river: River, waitDisplay: WaitDisplay | null): Hand {
-    return new Hand(direction, parent, river, waitDisplay, this.presentationMode === 'replay')
+    return new Hand(
+      direction,
+      parent,
+      river,
+      waitDisplay,
+      this.presentationMode === 'replay',
+      this.riverMatchHighlight,
+    )
   }
 
   private createRiver(direction: number, parent: Container): River {
@@ -1422,6 +1436,7 @@ export class MahjongScene {
       this.createRiver(2, c),
       this.createRiver(3, c),
     ]
+    this.riverMatchHighlight.bind(this.rivers)
 
     this.hands = [
       this.createHand(0, c, this.rivers[0], this.waitDisplay),
@@ -1515,7 +1530,6 @@ export class MahjongScene {
 
     const { viewer, seats, state } = snapshot
     const revealAllHands = Boolean(snapshot.reveal_all_hands)
-    this.pendingPassAckStageCounter = null
     this.openingReplacementTile = null
     this.selfDir = viewer.seat_index
     this.currentStageCounter = state.stage_counter
@@ -1551,6 +1565,7 @@ export class MahjongScene {
       this.createRiver(2, c),
       this.createRiver(3, c),
     ]
+    this.riverMatchHighlight.bind(this.rivers)
     this.hands = [
       this.createHand(0, c, this.rivers[0], this.waitDisplay),
       this.createHand(1, c, this.rivers[1], null),
@@ -1744,9 +1759,6 @@ export class MahjongScene {
     }
 
     if (typeof state.stage_counter === 'number' && state.stage_counter > 0) {
-      if (this.pendingPassAckStageCounter !== null && this.pendingPassAckStageCounter !== state.stage_counter) {
-        this.pendingPassAckStageCounter = null
-      }
       this.currentStageCounter = state.stage_counter
     }
     // if (typeof event.ui64_value === 'number') {
@@ -1757,6 +1769,11 @@ export class MahjongScene {
     const actorSeat: number = event.actor_seat ?? 0
     const actorDir = transDir(actorSeat, this.selfDir)
     const tile: number | undefined = event.tile
+    const claimDiscarderSeat = typeof event.discarder_seat === 'number'
+      && event.discarder_seat >= 0
+      && event.discarder_seat < 4
+      ? event.discarder_seat
+      : this.lastDiscarderSeat
 
     // Opening flower replacements are part of the initial hand on the server.
     // Merge every replacement tile after the flower round so all 14 dealer
@@ -1774,7 +1791,6 @@ export class MahjongScene {
         case 'start': {
           // New round: clear all tiles and reposition based on the new seat wind
           this.roundEnded = false
-          this.pendingPassAckStageCounter = null
           this.openingReplacementTile = null
           this.currentPendingStatus = 'none'
           this.currentViewerActions = []
@@ -1809,6 +1825,7 @@ export class MahjongScene {
             this.createRiver(2, c),
             this.createRiver(3, c),
           ]
+          this.riverMatchHighlight.bind(this.rivers)
           this.hands = [
             this.createHand(0, c, this.rivers[0], this.waitDisplay),
             this.createHand(1, c, this.rivers[1], null),
@@ -1890,7 +1907,8 @@ export class MahjongScene {
           break
         }
         case 'chow': {
-          const discarderRelDir = transDir(this.lastDiscarderSeat, this.selfDir)
+          this.lastDiscarderSeat = claimDiscarderSeat
+          const discarderRelDir = transDir(claimDiscarderSeat, this.selfDir)
           const centralTile = tile ?? 0
           const chowMode = event.ui64_value ?? 0
           this.hands[actorDir].chowFromRiver(this.rivers[discarderRelDir], centralTile, chowMode)
@@ -1901,8 +1919,9 @@ export class MahjongScene {
           break
         }
         case 'pung': {
-          const discarderRelDir = transDir(this.lastDiscarderSeat, this.selfDir)
-          const meldFromRel = backendMeldFromRel(actorSeat, this.lastDiscarderSeat)
+          this.lastDiscarderSeat = claimDiscarderSeat
+          const discarderRelDir = transDir(claimDiscarderSeat, this.selfDir)
+          const meldFromRel = backendMeldFromRel(actorSeat, claimDiscarderSeat)
           const t = tile ?? 0
           this.hands[actorDir].pungFromRiver(this.rivers[discarderRelDir], meldFromRel, t)
           if (this.presentationMode === 'replay' && !event.silent) {
@@ -1912,9 +1931,10 @@ export class MahjongScene {
           break
         }
         case 'melded_kong': {
-          const discarderRelDir = transDir(this.lastDiscarderSeat, this.selfDir)
+          this.lastDiscarderSeat = claimDiscarderSeat
+          const discarderRelDir = transDir(claimDiscarderSeat, this.selfDir)
           const t = tile ?? 0
-          const meldFromRel = backendMeldFromRel(actorSeat, this.lastDiscarderSeat)
+          const meldFromRel = backendMeldFromRel(actorSeat, claimDiscarderSeat)
           this.hands[actorDir].meldedKongFromRiver(this.rivers[discarderRelDir], meldFromRel, t)
           if (this.presentationMode === 'replay' && !event.silent) {
             this.showReplayClaimLabel(actorDir, tr('杠'), true)
@@ -2224,7 +2244,6 @@ export class MahjongScene {
     }
 
     this.deferredPending = null
-  this.pendingPassAckStageCounter = null
     this.currentViewerActions = []
     this.currentPendingStatus = 'none'
     this.inputEnabled = false
@@ -2424,19 +2443,14 @@ export class MahjongScene {
       this.center, 'discard', { available_actions: availableActions },
       reactionTile, this.hands[0],
       (action) => {
-        this.countdown.stop()
-        this.hands[0].unwaitDiscard()
         if (action.kind === 'pass') {
           this.requestPassAction()
-          return false
+        } else {
+          this.sendViewerAction(action)
         }
-        this.sendGameInput({
-          kind: action.kind,
-          tile: action.tile,
-          use_drawn_tile: action.use_drawn_tile,
-          ui64_value: action.ui64_value,
-        })
-        return true
+        // sendGameInput owns cleanup. Do not clear the old panel twice: a
+        // synchronous response may already have opened the next ask's panel.
+        return false
       },
       () => { this.meldChoicesPanel = null },
     )
@@ -2477,88 +2491,6 @@ export class MahjongScene {
   /** Trigger a renderer resize (e.g. after the sidebar height changes). */
   forceResize(): void {
     this.scheduleResizeAndLayout()
-  }
-
-  // ── 牌桌垂直滑动（手机竖屏：置顶/自由拖动）──────────────────────
-
-  /**
-   * 牌桌垂直滑动的可用范围（相对 center.y 基准的偏移，正=向下）。
-   * min = 置顶（内容顶边贴到牌桌区上缘），max = 置底（内容底边保持在底部保留区之上）。
-   */
-  getVerticalSlideLimits(): { min: number; max: number } {
-    if (!this.app) {
-      return { min: 0, max: 0 }
-    }
-    const bounds = this.center.getBounds()
-    const viewHeight = this.app.screen.height
-    const top = bounds.top - this.currentSlide
-    const bottom = bounds.bottom - this.currentSlide
-    const min = -Math.max(0, top)
-    // 底部保留区：给底部操作 Dock 留出空间，避免手牌/辅助方块被盖住
-    const bottomReserve = 150
-    const max = Math.max(min, viewHeight - bottom - bottomReserve)
-    return { min, max }
-  }
-
-  /** 设置垂直滑动偏移（自动夹紧），返回实际生效的偏移。 */
-  setVerticalSlide(offset: number): number {
-    if (!this.app) {
-      return 0
-    }
-    const { min, max } = this.getVerticalSlideLimits()
-    this.currentSlide = Math.min(max, Math.max(min, offset))
-    this.center.y = this.baseCenterY + this.currentSlide
-    return this.currentSlide
-  }
-
-  /** 当前垂直滑动偏移。 */
-  getVerticalSlide(): number {
-    return this.currentSlide
-  }
-
-  /** 置顶：牌桌贴到牌桌区最上边缘。 */
-  pinTableToTop(): number {
-    return this.setVerticalSlide(this.getVerticalSlideLimits().min)
-  }
-
-  /** 将客户端坐标换算为舞台坐标（Stage 坐标与 Canvas CSS 像素一致）。 */
-  stagePointFromClient(clientX: number, clientY: number): { x: number; y: number } {
-    const canvas = this.app?.canvas
-    if (!canvas) {
-      return { x: 0, y: 0 }
-    }
-    const rect = canvas.getBoundingClientRect()
-    return {
-      x: ((clientX - rect.left) / Math.max(rect.width, 1)) * this.app!.screen.width,
-      y: ((clientY - rect.top) / Math.max(rect.height, 1)) * this.app!.screen.height,
-    }
-  }
-
-  /** 该舞台点是否命中可交互对象（牌/按钮/辅助方块），用于区分“空白处拖动牌桌”。 */
-  isOverInteractive(x: number, y: number): boolean {
-    if (!this.app) {
-      return false
-    }
-    try {
-      const eventSystem = (this.app.renderer as unknown as {
-        events?: { rootBoundary?: { hitTest?: (px: number, py: number) => unknown } }
-      }).events
-      if (eventSystem?.rootBoundary?.hitTest?.(x, y) != null) {
-        return true
-      }
-    } catch {
-      // fall through to hand-area check
-    }
-    // 自家手牌区域（含辅助方块）即使当前不可点也视为“非空白”，避免误拖牌桌
-    const hand = this.hands?.[0]
-    if (hand) {
-      try {
-        return hand.getBounds().contains(x, y)
-      } catch {
-        return false
-      }
-    }
-    return false
   }
 
   handleLatencyPong(identifier: number | null | undefined): void {

@@ -1,9 +1,9 @@
 export const GUOBIAO_FAN_DICT = {
   dasixi: '大四喜', dasanyuan: '大三元', lvyise: '绿一色', jiulianbaodeng: '九莲宝灯',
-  sigang: '四杠', sangang: '三杠', lianqidui: '连七对', shisanyao: '十三幺',
+  sigang: '四杠', lianqidui: '连七对', shisanyao: '十三幺',
   qingyaojiu: '清幺九', xiaosixi: '小四喜', xiaosanyuan: '小三元', ziyise: '字一色',
   sianke: '四暗刻', yiseshuanglonghui: '一色双龙会', yisesitongshun: '一色四同顺',
-  yisesijiegao: '一色四节高', yisesibugao: '一色四步高', hunyaojiu: '混幺九',
+  yisesijiegao: '一色四节高', yisesibugao: '一色四步高', sangang: '三杠', hunyaojiu: '混幺九',
   qiduizi: '七对', qixingbukao: '七星不靠', quanshuangke: '全双刻', qingyise: '清一色',
   yisesantongshun: '一色三同顺', yisesanjiegao: '一色三节高', quanda: '全大',
   quanzhong: '全中', quanxiao: '全小', qinglong: '清龙', sanseshuanglonghui: '三色双龙会',
@@ -24,3 +24,140 @@ export const GUOBIAO_FAN_DICT = {
 };
 
 export const GUOBIAO_FAN_KEYS = Object.keys(GUOBIAO_FAN_DICT);
+
+/** 国标番种番数（与猜番题库一致，用于档次筛选） */
+export const GUOBIAO_FAN_VALUES = {
+  dasixi: 88,
+  dasanyuan: 88,
+  lvyise: 88,
+  jiulianbaodeng: 88,
+  sigang: 88,
+  lianqidui: 88,
+  shisanyao: 88,
+  qingyaojiu: 64,
+  xiaosixi: 64,
+  xiaosanyuan: 64,
+  ziyise: 64,
+  sianke: 64,
+  yiseshuanglonghui: 64,
+  yisesitongshun: 48,
+  yisesijiegao: 48,
+  yisesibugao: 32,
+  sangang: 32,
+  hunyaojiu: 32,
+  qiduizi: 24,
+  qixingbukao: 24,
+  quanshuangke: 24,
+  qingyise: 24,
+  yisesantongshun: 24,
+  yisesanjiegao: 24,
+  quanda: 24,
+  quanzhong: 24,
+  quanxiao: 24,
+  qinglong: 16,
+  sanseshuanglonghui: 16,
+  yisesanbugao: 16,
+  quandaiwu: 16,
+  santongke: 16,
+  sananke: 16,
+  quanbukao: 12,
+  zuhelong: 12,
+  dayuwu: 12,
+  xiaoyuwu: 12,
+  sanfengke: 12,
+  hualong: 8,
+  tuibudao: 8,
+  sansesantongshun: 8,
+  sansesanjiegao: 8,
+  wufanhe: 8,
+  miaoshouhuichun: 8,
+  haidilaoyue: 8,
+  gangshangkaihua: 8,
+  qiangganghe: 8,
+  pengpenghe: 6,
+  hunyise: 6,
+  sansesanbugao: 6,
+  wumenqi: 6,
+  quanqiuren: 6,
+  shuangangang: 6,
+  shuangjianke: 6,
+  quandaiyao: 4,
+  buqiuren: 4,
+  shuangminggang: 4,
+  hejuezhang: 4,
+  jianke: 2,
+  quanfengke: 2,
+  menfengke: 2,
+  menqianqing: 2,
+  pinghe: 2,
+  siguiyi: 2,
+  shuangtongke: 2,
+  shuanganke: 2,
+  angang: 2,
+  duanyao: 2,
+  yibangao: 1,
+  xixiangfeng: 1,
+  lianliu: 1,
+  laoshaofu: 1,
+  yaojiuke: 1,
+  minggang: 1,
+  queyimen: 1,
+  wuzi: 1,
+  bianzhang: 1,
+  qianzhang: 1,
+  dandiaojiang: 1,
+  zimo: 1,
+  huapai: 1,
+  mingangang: 5,
+};
+
+/** 国标番种表顺序（按番数档，与 GUOBIAO_FAN_VALUES 插入序一致；明暗杠仍在表末） */
+export const GUOBIAO_FAN_DISPLAY_KEYS = Object.keys(GUOBIAO_FAN_VALUES)
+
+export function listGuobiaoFanEntries() {
+  return GUOBIAO_FAN_DISPLAY_KEYS.map((key) => {
+    const name = GUOBIAO_FAN_DICT[key]
+    const value = GUOBIAO_FAN_VALUES[key] || 0
+    return {
+      key,
+      name,
+      value,
+      label: `${name}（${value} 番）`,
+    }
+  }).filter((item) => item.name)
+}
+
+const GUOBIAO_FAN_VALUE_BY_NAME = Object.fromEntries(
+  Object.entries(GUOBIAO_FAN_DICT).map(([key, name]) => [name, GUOBIAO_FAN_VALUES[key] ?? 0]),
+)
+GUOBIAO_FAN_VALUE_BY_NAME['七对子'] = GUOBIAO_FAN_VALUES.qiduizi
+GUOBIAO_FAN_VALUE_BY_NAME['断幺九'] = GUOBIAO_FAN_VALUES.duanyao
+
+export const GUOBIAO_FAN_KEY_BY_NAME = Object.fromEntries(
+  Object.entries(GUOBIAO_FAN_DICT).map(([key, name]) => [name, key]),
+)
+GUOBIAO_FAN_KEY_BY_NAME['七对子'] = 'qiduizi'
+GUOBIAO_FAN_KEY_BY_NAME['断幺九'] = 'duanyao'
+
+/** 与服务端 store_guobiao.STACKABLE_FANS 一致：带 *n 时按次数累加 */
+export const GUOBIAO_STACKABLE_FANS = new Set([
+  '花牌', '四归一', '双同刻', '一般高', '喜相逢', '幺九刻', '连六',
+])
+
+/** 解析计算器返回的番种名（如「喜相逢*1」）为与虹雀一致的 { name, count, value }。 */
+export function parseGuobiaoFanLabel(raw) {
+  const source = String(raw || '')
+  const match = source.match(/^(.*?)(?:\*(\d+))?$/)
+  const name = (match?.[1] || source).trim()
+  const count = match?.[2] ? Number(match[2]) : 1
+  const value = GUOBIAO_FAN_VALUE_BY_NAME[name] ?? 0
+  return { name, count, value, total: value * count }
+}
+
+/** 国标计算器番种构成展示：清龙 ×1（16 番） */
+export function formatGuobiaoFanComposition(raw) {
+  const fan = parseGuobiaoFanLabel(raw)
+  if (!fan.name) return String(raw || '')
+  if (!fan.value) return fan.count > 1 ? `${fan.name} ×${fan.count}` : fan.name
+  return `${fan.name} ×${fan.count}（${fan.value} 番）`
+}

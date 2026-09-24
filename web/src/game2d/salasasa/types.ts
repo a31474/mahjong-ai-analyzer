@@ -11,6 +11,9 @@ export interface SalasasaRankData {
   guobiao_rank: string
   guobiao_score: number
   is_sponsor?: boolean
+  is_beginner_qualified?: boolean
+  is_intermediate_qualified?: boolean
+  is_advanced_qualified?: boolean
   is_mcrpl_qualified?: boolean
 }
 
@@ -26,6 +29,8 @@ export interface SalasasaResponse {
   login_info?: SalasasaLoginInfo
   rank_data?: SalasasaRankData
   queue_status?: Record<string, { waiting: number; playing: number }>
+  my_queue?: string | null
+  match_committed?: boolean
   game_info?: SalasasaGameInfo
   ask_hand_action_info?: SalasasaAskHandInfo
   ask_other_action_info?: SalasasaAskOtherInfo
@@ -162,6 +167,7 @@ export interface SalasasaGameEndInfo {
     rank_before?: string
     rank_after?: string
   }>
+  record_detail?: Record<string, unknown>
 }
 
 export type StoredCredentials =

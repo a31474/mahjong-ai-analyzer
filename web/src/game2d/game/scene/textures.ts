@@ -1,11 +1,11 @@
 import { Assets, Texture } from 'pixi.js'
-import { tileIdToAlias, TILE_TEXTURE_PATHS } from './constants'
+import { isFlowerFaceId, tileIdToAlias, TILE_TEXTURE_PATHS } from './constants'
 import type { FlowerFaceTheme, TileFaceTheme } from '../../lib/sceneAppearance'
 
 let loaded = false
 let loadPromise: Promise<void> | null = null
 let tileFaceTheme: TileFaceTheme = 'regular'
-let flowerFaceTheme: FlowerFaceTheme = 'flat'
+let flowerFaceTheme: FlowerFaceTheme = 'unity'
 
 export function setTileThemes(tileTheme: TileFaceTheme, flowerTheme: FlowerFaceTheme): void {
   tileFaceTheme = tileTheme
@@ -14,6 +14,10 @@ export function setTileThemes(tileTheme: TileFaceTheme, flowerTheme: FlowerFaceT
 
 export function isBlackTileFaceTheme(): boolean {
   return tileFaceTheme === 'black'
+}
+
+export function isUnityFlowerFace(tid: number): boolean {
+  return flowerFaceTheme === 'unity' && isFlowerFaceId(Number(tileIdToAlias(tid)))
 }
 
 /** Ensure all tile textures are loaded. Safe to call multiple times. */
@@ -31,7 +35,7 @@ export function getTexture(tid: number): Texture {
     return (Assets.get(`${theme}-Back`) as Texture | undefined) ?? Texture.WHITE
   }
   const alias = tileIdToAlias(tid)
-  const isFlower = alias.startsWith('Flower')
+  const isFlower = isFlowerFaceId(Number(alias))
   if (isFlower && flowerFaceTheme === 'unity') {
     return (Assets.get(`unity-${alias}`) as Texture | undefined)
       ?? (Assets.get(`regular-${alias}`) as Texture | undefined)

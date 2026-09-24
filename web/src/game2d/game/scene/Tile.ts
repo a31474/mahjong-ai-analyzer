@@ -3,9 +3,12 @@ import {
   TILE_WIDTH, TILE_HEIGHT, TILE_RADIUS, LINE_WIDTH,
   FRONT_COLOR, BACK_COLOR, BORDER_COLOR, ANIMATION_TIME,
 } from './constants'
-import { getTexture, isBlackTileFaceTheme } from './textures'
+import { getTexture, isBlackTileFaceTheme, isUnityFlowerFace } from './textures'
 
 export const TILE_HOVER_TINT = 0xe0e0e0
+export const TILE_SELECTED_TINT = 0xb8d9ff
+/** 牌河同类牌高亮，对齐 3D Card3DHoverManager 的偏蓝叠加。 */
+export const TILE_MATCH_TINT = 0xb8d9ff
 export const FROM_DRAWN_TINT = 0xcccccc
 export const RECORD_DANGER_TINT = 0xff9b9b
 const BLACK_FRONT_COLOR = 0x1e1e1e
@@ -68,6 +71,8 @@ export class Tile extends Container {
   private onHoverOut: (() => void) | null = null
   private persistentTint = 0xffffff
   private dangerTint: number | null = null
+  private matchTint: number | null = null
+  private selectionTint: number | null = null
   private hoverTint: number | null = null
   private hoverTintColor: number | null = TILE_HOVER_TINT
   private hoverVisualEnabled = true
@@ -142,12 +147,12 @@ export class Tile extends Container {
   private redrawBackground(): void {
     this.bg.clear()
     this.bg.roundRect(-TILE_WIDTH / 2, -TILE_HEIGHT / 2, TILE_WIDTH, TILE_HEIGHT, TILE_RADIUS)
-    this.bg.fill({ color: isBlackTileFaceTheme() ? BLACK_FRONT_COLOR : FRONT_COLOR })
+    this.bg.fill({ color: isBlackTileFaceTheme() && !isUnityFlowerFace(this.tid) ? BLACK_FRONT_COLOR : FRONT_COLOR })
     this.bg.stroke({ color: BORDER_COLOR, width: LINE_WIDTH })
   }
 
   private applyTint(): void {
-    this.setTint(this.hoverTint ?? this.dangerTint ?? this.persistentTint)
+    this.setTint(this.hoverTint ?? this.selectionTint ?? this.matchTint ?? this.dangerTint ?? this.persistentTint)
   }
 
   setCoverColor(color: number): void {
@@ -158,6 +163,17 @@ export class Tile extends Container {
 
   setPersistentTint(tint: number | null): void {
     this.persistentTint = tint ?? 0xffffff
+    this.applyTint()
+  }
+
+  setSelectionTint(enabled: boolean): void {
+    this.selectionTint = enabled ? TILE_SELECTED_TINT : null
+    this.applyTint()
+  }
+
+  setMatchHighlight(enabled: boolean): void {
+    if (this.destroyed) return
+    this.matchTint = enabled ? TILE_MATCH_TINT : null
     this.applyTint()
   }
 
@@ -270,8 +286,10 @@ export class Tile extends Container {
 
   private fitSpriteToTileFace(): void {
     if (!this.sprite) return
-    this.sprite.width = TILE_WIDTH * (5 / 6)
-    this.sprite.height = TILE_HEIGHT * (5 / 6)
+    // Flower vectors already contain their optical margin; don't shrink them like a full tile image.
+    const faceScale = isUnityFlowerFace(this.tid) ? 0.94 : 5 / 6
+    this.sprite.width = TILE_WIDTH * faceScale
+    this.sprite.height = TILE_HEIGHT * faceScale
   }
 
   refreshTexture(): void {
