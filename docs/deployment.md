@@ -99,6 +99,7 @@ sudo nginx -t && sudo systemctl reload nginx
 |---|---|
 | 只改前端 | 本地 `npm run build` → `rsync -a --delete web/dist/ <user>@<host>:~/project/mahjong-ai-analyzer/web/dist/`（**不用重启服务**，后端直接读磁盘上的 dist） |
 | 只改后端 | `git pull` → `systemctl --user restart mcr-ai`（依赖有变时先 `uv pip install --python .venv/bin/python -r requirements.txt`） |
+| **改牌面映射/事件处理**（`backend/tiles.py`、`backend/converter.py`） | 重启服务即可：磁盘缓存键含这两个文件的**内容指纹**，旧结果自动不再命中，**不需要手动清 `backend/cache/`**。注意同时更新前端（`web/src/views/game2d/Replay.vue` 的 `AI_SUIT_PREFIX` 与后端映射成对），否则 AI 面板牌面会张冠李戴 |
 | 权重更新 | `bash backend/fetch_weights.sh` → 重启服务 |
 | 其他 | 模板类文件改动：`sudo nginx -t && sudo systemctl reload nginx` |
 
@@ -120,7 +121,7 @@ curl -s -X POST https://<域名>/api/analyze/prepare -H 'Content-Type: applicati
   -d '{"game_id":"maRXmmjmqR"}' | head -c 200
 ```
 
-浏览器侧：打开首页输入页 → 填 `maRXmmjmqR` → 进入回放页 → 推进到任一「打出」节点，左上角 AI 面板应显示 top3 概率。
+浏览器侧：打开首页输入页 → 填 `maRXmmjmqR` → 进入回放页 → 推进到任一「打出」节点，**右上角**（可拖动、双击标题复位）的 AI 面板应显示 top3 概率，牌面图与牌名一致（筒显示筒、索显示索）。
 
 ## 5. 排错
 
@@ -134,6 +135,7 @@ curl -s -X POST https://<域名>/api/analyze/prepare -H 'Content-Type: applicati
 | prepare 报拉取失败 | 服务器访问不了 `salasasa.cn`；或 game_id 不存在；已分析过的牌谱有磁盘缓存，可离线查看 |
 | 429 / 503 且来自 nginx | 命中限速：`limit_req` 的 `rate`/`burst` 档位，或同一出口 IP 的多人共享额度 |
 | 牌面 404 / 显示旧牌面 | dist 没同步或没带 `--delete`；浏览器缓存未刷新 |
+| AI 面板牌名与牌面不符（例如把筒显示成索） | 前端与后端的牌面映射版本不一致：后端 `tiles.py`（B=筒、T=索）与前端 `Replay.vue` 的 `AI_SUIT_PREFIX` 必须成对更新，且 `web/dist` 要重新构建同步 |
 | 磁盘满 / 缓存过大 | `backend/cache/` 会累积（step 结果上限 5000 个文件、牌谱 200 个），可 `rm -rf backend/cache/` 清空（会丢失重启保留的分析缓存） |
 
 ## 6. 维护
