@@ -14,8 +14,20 @@
           @wheel.capture.prevent="onBoardWheel"
         />
 
-        <div v-if="replay && sceneReady && analysisId" class="ai-panel" aria-label="AI 复盘面板">
-          <header class="ai-panel__head">
+        <div
+          v-if="replay && sceneReady && analysisId"
+          ref="aiPanelElement"
+          class="ai-panel"
+          :class="{ 'is-dragging': aiPanelDragging }"
+          :style="aiPanelStyle"
+          aria-label="AI 复盘面板"
+        >
+          <header
+            class="ai-panel__head"
+            title="拖动可移动面板；双击复位到右上角"
+            @pointerdown="startAiPanelDrag"
+            @dblclick="resetAiPanelPosition"
+          >
             <strong>AI 复盘</strong>
             <span v-if="viewerForAi">{{ viewerForAi.username }} 视角</span>
           </header>
@@ -544,6 +556,20 @@ const platformInput = ref('')
 const recordJsonInput = ref('')
 const inputError = ref('')
 const preparing = ref(false)
+/**
+ * AI 面板位置：默认停在牌桌右上角（避免压住左侧侧边牌山），拖动后记录相对
+ * .replay-board 的 left/top 并存 localStorage；双击标题复位回默认右上角。
+ */
+const AI_PANEL_POSITION_KEY = 'mcr-ai-panel-position'
+const AI_PANEL_MIN_MARGIN = 12
+const aiPanelElement = ref<HTMLElement | null>(null)
+const aiPanelDragging = ref(false)
+const aiPanelPosition = ref<{ x: number, y: number } | null>(loadAiPanelPosition())
+let aiPanelDragOffset = { x: 0, y: 0 }
+
+const aiPanelStyle = computed(() => (aiPanelPosition.value
+  ? { left: `${aiPanelPosition.value.x}px`, top: `${aiPanelPosition.value.y}px`, right: 'auto' }
+  : {}))
 let aiNodeMaps: Map<number, Map<number, Map<number, number>>> | null = null
 let aiRequestId = 0
 let scene: MahjongScene | null = null
@@ -1840,6 +1866,85 @@ function aiTileLabel(tile: string): string {
   return names[prefix] ? `${rank}${names[prefix]}` : String(tile ?? '—')
 }
 
+function loadAiPanelPosition(): { x: number, y: number } | null {
+  try {
+    const raw = localStorage.getItem(AI_PANEL_POSITION_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Partial<{ x: number, y: number }>
+    const x = Number(parsed?.x)
+    const y = Number(parsed?.y)
+    return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null
+  } catch {
+    return null
+  }
+}
+
+function saveAiPanelPosition(position: { x: number, y: number } | null) {
+  try {
+    if (position) localStorage.setItem(AI_PANEL_POSITION_KEY, JSON.stringify(position))
+    else localStorage.removeItem(AI_PANEL_POSITION_KEY)
+  } catch {
+    // 隐私模式等禁用 localStorage 的场景：位置仅本次会话生效
+  }
+}
+
+/** 把面板位置限制在牌桌内，避免拖出可视区域。 */
+function clampAiPanelPosition(x: number, y: number): { x: number, y: number } {
+  const panel = aiPanelElement.value
+  const board = panel?.offsetParent as HTMLElement | null
+  if (!panel || !board) {
+    return { x: Math.max(AI_PANEL_MIN_MARGIN, x), y: Math.max(AI_PANEL_MIN_MARGIN, y) }
+  }
+  const maxX = Math.max(AI_PANEL_MIN_MARGIN, board.clientWidth - panel.offsetWidth - AI_PANEL_MIN_MARGIN)
+  const maxY = Math.max(AI_PANEL_MIN_MARGIN, board.clientHeight - panel.offsetHeight - AI_PANEL_MIN_MARGIN)
+  return {
+    x: Math.min(Math.max(AI_PANEL_MIN_MARGIN, x), maxX),
+    y: Math.min(Math.max(AI_PANEL_MIN_MARGIN, y), maxY),
+  }
+}
+
+function moveAiPanelDrag(event: PointerEvent) {
+  const board = aiPanelElement.value?.offsetParent as HTMLElement | null
+  if (!board) return
+  const boardRect = board.getBoundingClientRect()
+  aiPanelPosition.value = clampAiPanelPosition(
+    event.clientX - boardRect.left - aiPanelDragOffset.x,
+    event.clientY - boardRect.top - aiPanelDragOffset.y,
+  )
+}
+
+function endAiPanelDrag() {
+  if (!aiPanelDragging.value) return
+  aiPanelDragging.value = false
+  window.removeEventListener('pointermove', moveAiPanelDrag)
+  window.removeEventListener('pointerup', endAiPanelDrag)
+  window.removeEventListener('pointercancel', endAiPanelDrag)
+  saveAiPanelPosition(aiPanelPosition.value)
+}
+
+function startAiPanelDrag(event: PointerEvent) {
+  const panel = aiPanelElement.value
+  if (!panel || event.button !== 0) return
+  const rect = panel.getBoundingClientRect()
+  aiPanelDragOffset = { x: event.clientX - rect.left, y: event.clientY - rect.top }
+  aiPanelDragging.value = true
+  window.addEventListener('pointermove', moveAiPanelDrag)
+  window.addEventListener('pointerup', endAiPanelDrag)
+  window.addEventListener('pointercancel', endAiPanelDrag)
+  event.preventDefault()
+}
+
+function resetAiPanelPosition() {
+  aiPanelPosition.value = null
+  saveAiPanelPosition(null)
+}
+
+/** 窗口尺寸变化后若面板被挤出牌桌，拉回可视范围。 */
+function refitAiPanelPosition() {
+  if (!aiPanelPosition.value) return
+  aiPanelPosition.value = clampAiPanelPosition(aiPanelPosition.value.x, aiPanelPosition.value.y)
+}
+
 async function loadRecord() {
   const gameId = String(route.params.gameId || '')
   if (!gameId) {
@@ -1907,11 +2012,16 @@ watch(() => route.params.gameId, loadRecord)
 
 onMounted(() => {
   window.addEventListener('keydown', onKeydown)
+  window.addEventListener('resize', refitAiPanelPosition)
   void loadRecord()
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('resize', refitAiPanelPosition)
+  window.removeEventListener('pointermove', moveAiPanelDrag)
+  window.removeEventListener('pointerup', endAiPanelDrag)
+  window.removeEventListener('pointercancel', endAiPanelDrag)
   stopPlaying()
   clearResultTimers()
   scene?.destroy()

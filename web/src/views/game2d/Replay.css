@@ -495,7 +495,7 @@
 .ai-panel {
   position: absolute;
   top: 12px;
-  left: 12px;
+  right: 12px;
   z-index: 45;
   width: 218px;
   padding: 10px 11px;
@@ -507,14 +507,29 @@
   box-sizing: border-box;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
 }
+/* 拖到任意位置时抬高层级，避免被牌桌提示层压住 */
+.ai-panel.is-dragging { z-index: 60; box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45); }
 .ai-panel__head {
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
   gap: 8px;
   margin-bottom: 7px;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
 }
-.ai-panel__head strong { color: #f2f3f3; font-size: 13px; letter-spacing: 0.05em; }
+.ai-panel.is-dragging .ai-panel__head { cursor: grabbing; }
+/* 拖动手柄提示（六个点） */
+.ai-panel__head::before {
+  content: '';
+  align-self: center;
+  flex: 0 0 auto;
+  width: 9px;
+  height: 12px;
+  background-image: radial-gradient(circle, rgba(255, 255, 255, 0.5) 1px, transparent 1.2px);
+  background-size: 4px 4px;
+}
+.ai-panel__head strong { margin-right: auto; color: #f2f3f3; font-size: 13px; letter-spacing: 0.05em; }
 .ai-panel__head span { overflow: hidden; color: #9aa1a3; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .ai-panel__state { padding: 4px 0 2px; color: #aeb4b6; font-size: 12px; }
 .ai-panel__state.is-error { color: #f0a0a0; }

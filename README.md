@@ -37,7 +37,7 @@
 - `backend/model_loader.py`：三学生 ensemble 加载（`ENSEMBLE=1` 时单学生）
 - `web/`：Vue 3 + PixiJS 前端（回放引擎来自 open_mahjong_unity）
   - 2D 回放界面已同步上游 `open_mahjong_unity` 提交 `4db27ac0`（dev ver 0.4.76.6，2026-09-17）：`web/src/game2d/`、`web/src/views/game2d/`、`web/src/constants/`、`web/src/i18n/`、`web/public/game2d-assets/`
-  - 本地定制（上游同步时保留）：`web/src/game2d/ai/api.ts`（AI 接口）、`Replay.vue` 的 AI 复盘面板与牌谱输入页、`salasasa/api.ts` 精简（去掉站点登录相关接口）、`replay/recordReplay.ts` 的最终分缺失兜底
+  - 本地定制（上游同步时保留）：`web/src/game2d/ai/api.ts`（AI 接口）、`Replay.vue` 的 AI 复盘面板（默认右上角，拖动标题可移动、位置记在 `localStorage`、双击标题复位）与牌谱输入页、`salasasa/api.ts` 精简（去掉站点登录相关接口）、`replay/recordReplay.ts` 的最终分缺失兜底
   - 未同步的上游改动：`@/utils/localGameRecordStore`（Unity 客户端本地牌谱库）与 `@/utils/recordShareLink`（站点 2D/3D 分享链接）相关逻辑——本服务无对应页面与存储，保留原有加载/分享实现
 
 ## 运行步骤
