@@ -600,7 +600,8 @@
 .replay-input__field { display: grid; gap: 4px; }
 .replay-input__field > span { color: #9aa1a3; font-size: 11px; }
 .replay-input__field input,
-.replay-input__field textarea {
+.replay-input__field textarea,
+.replay-input__field select {
   width: 100%;
   padding: 8px 9px;
   border: 1px solid #41484c;
@@ -613,9 +614,12 @@
   resize: vertical;
 }
 .replay-input__field input:focus,
-.replay-input__field textarea:focus { border-color: #df7d23; }
+.replay-input__field textarea:focus,
+.replay-input__field select:focus { border-color: #df7d23; }
 .replay-input__field textarea { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 11px; }
-.replay-input__or { color: #6f777a; font-size: 11px; text-align: center; }
+/* color-scheme 让展开的原生选项列表跟随深色主题 */
+.replay-input__field select { color-scheme: dark; cursor: pointer; }
+.replay-input__field select:disabled { cursor: not-allowed; opacity: 0.55; }
 .replay-input__submit {
   min-height: 36px;
   border: 1px solid #c86818;

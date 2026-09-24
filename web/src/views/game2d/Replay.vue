@@ -293,23 +293,43 @@
         <div v-if="inputPage && !replay && !loading && !errorMessage" class="replay-input-layer">
           <section class="replay-input-panel">
             <h2>加载牌谱进行 AI 复盘</h2>
-            <label class="replay-input__field">
-              <span>对局 ID（后端从平台拉取）</span>
-              <input v-model="gameIdInput" type="text" placeholder="对局 ID 或回放链接（如 nfkKiKHWH4 / https://salasasa.cn/2d/record/nfkKiKHWH4）" @keydown.enter="submitInput" />
-            </label>
-            <label class="replay-input__field">
-              <span>平台地址（可选）</span>
-              <input v-model="platformInput" type="text" placeholder="https://salasasa.cn" @keydown.enter="submitInput" />
-            </label>
-            <div class="replay-input__or">—— 或直接粘贴牌谱 JSON（上传模式）——</div>
-            <label class="replay-input__field">
+            <div class="replay-input__field">
+              <span>平台</span>
+              <select
+                v-model="platformInput"
+                class="replay-input__select"
+                :disabled="inputMode === 'json'"
+                :title="inputMode === 'json' ? '上传牌谱 JSON 时不需要平台' : '牌谱来源平台'"
+              >
+                <option v-for="platform in PLATFORM_OPTIONS" :key="platform.value" :value="platform.value">
+                  {{ platform.label }}
+                </option>
+              </select>
+            </div>
+            <div class="replay-input__field">
+              <span>输入方式</span>
+              <select v-model="inputMode" class="replay-input__select">
+                <option value="link">链接 / 对局 ID</option>
+                <option value="json">牌谱 JSON</option>
+              </select>
+            </div>
+            <div v-if="inputMode === 'link'" class="replay-input__field">
+              <span>对局 ID 或回放链接</span>
+              <input
+                v-model="gameIdInput"
+                type="text"
+                placeholder="对局 ID 或回放链接（如 nfkKiKHWH4 / https://salasasa.cn/2d/record/nfkKiKHWH4）"
+                @keydown.enter="submitInput"
+              />
+            </div>
+            <div v-else class="replay-input__field">
               <span>牌谱 JSON</span>
               <textarea
                 v-model="recordJsonInput"
-                rows="6"
+                rows="8"
                 placeholder='{"game_id": "...", "rule": "guobiao", "record": {"game_round": {...}}}'
               />
-            </label>
+            </div>
             <button type="button" class="replay-input__submit" :disabled="preparing" @click="submitInput">
               {{ preparing ? '分析中…' : '开始分析' }}
             </button>
@@ -552,7 +572,13 @@ const aiLoading = ref(false)
 const aiError = ref('')
 const inputPage = ref(false)
 const gameIdInput = ref('')
-const platformInput = ref('')
+/** 平台下拉：目前只支持 salasasa，后续接入其他平台时在此追加选项即可。 */
+const PLATFORM_OPTIONS = [
+  { value: 'https://salasasa.cn', label: 'salasasa（salasasa.cn）' },
+]
+const platformInput = ref(PLATFORM_OPTIONS[0].value)
+/** 输入方式：link = 对局 ID/回放链接（后端从平台拉取），json = 粘贴牌谱 JSON 上传。 */
+const inputMode = ref<'link' | 'json'>('link')
 const recordJsonInput = ref('')
 const inputError = ref('')
 const preparing = ref(false)
@@ -1794,10 +1820,14 @@ function parseGameIdOrUrl(raw: string): string | null {
 }
 
 async function submitInput() {
-  const trimmed = recordJsonInput.value.trim()
   let payload: { game_id?: string; platform?: string; record?: unknown }
   let gid = ''
-  if (trimmed) {
+  if (inputMode.value === 'json') {
+    const trimmed = recordJsonInput.value.trim()
+    if (!trimmed) {
+      inputError.value = '请粘贴牌谱 JSON'
+      return
+    }
     let parsed: unknown
     try {
       parsed = JSON.parse(trimmed)
@@ -1806,19 +1836,21 @@ async function submitInput() {
       return
     }
     payload = { record: parsed }
-  } else if (gameIdInput.value.trim()) {
-    gid = parseGameIdOrUrl(gameIdInput.value) ?? ''
+  } else {
+    const raw = gameIdInput.value.trim()
+    if (!raw) {
+      inputError.value = '请输入对局 ID 或回放链接'
+      return
+    }
+    gid = parseGameIdOrUrl(raw) ?? ''
     if (!gid) {
       inputError.value = '无法识别的对局 ID/链接（支持纯 ID、2D 回放链接、Unity 回放链接）'
       return
     }
     payload = {
       game_id: gid,
-      platform: platformInput.value.trim() || undefined,
+      platform: platformInput.value || undefined,
     }
-  } else {
-    inputError.value = '请输入对局 ID 或粘贴牌谱 JSON'
-    return
   }
   preparing.value = true
   inputError.value = ''
@@ -2005,6 +2037,8 @@ watch([roundIndex, node, viewerOriginal], () => {
   renderPosition()
 })
 watch([roundIndex, node, viewerOriginal], requestAi)
+// 切换"链接 / 牌谱 JSON"时清掉上一个模式的报错
+watch(inputMode, () => { inputError.value = '' })
 watch(locale, () => {
   scene?.refreshRoundLabel()
 })
