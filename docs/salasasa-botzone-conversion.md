@@ -206,3 +206,47 @@ reset 出现在首个 c 之前: 48/48
 | `mcr-ai/rule.md` | 国标规则要点（144 张、不设连庄、截和制等） |
 
 > 注：`campaign/ludus_rl/docs/07_BOTZONE_PARITY.md` 讲的是自研平台与 Botzone 的**功能对照**，`doc/blog_2026-06-05_parity-mirage.md` 讲**评测方法论**（同源对手导致的 parity 陷阱），二者与牌谱转换无关，仅作背景。
+
+## 9. 观测一致性验证（feature parity）
+
+怀疑点：本仓库用的 `FeatureAgent`（观测 38 平面 × 4 × 9）是否与 IJCAI 训练/评测侧**同一份实现**？毕竟仓库里存在两套 FeatureAgent。
+
+复现：`PYTHONPATH=backend .venv/bin/python scripts/verify_feature_parity.py --rounds 3`
+
+### 9.1 源码级
+
+| 文件 | sha1 |
+|---|---|
+| `backend/engine/feature.py`（本仓库） | `c4a13b2733d7…` |
+| `IJCAI-mahjong/deploy/caiest_cnn/feature.py` | `c4a13b2733d7…` |
+| `IJCAI-mahjong/train/caiest_repro/feature.py` | `c4a13b2733d7…` |
+
+**三份字节一致**；而训练主线（`train/caiest_repro/{bot_cfg,bot_main,distill,cook_*,curriculum_states}.py`）import 的正是 `from feature import FeatureAgent`。⇒ 本仓库的观测实现就是训练主线那一份。
+
+### 9.2 运行时（368 步，3 局 viewer=0）
+
+用本仓库 `converter` 从 salasasa 牌谱产生 request 序列，分别驱动两条加载路径：
+
+```
+A(analyzer engine) vs B(训练侧副本)   —— parity 判据
+  observation 逐位不同: 0 步
+  合法动作集合不同 : 0 步
+```
+
+（注意：每局 `seatWind` 不同、FeatureAgent 状态不跨局，重放必须逐局新建 agent——脚本已按此实现。）
+
+### 9.3 另一套实现：`train/caiest_repro/data/feature_agent.py`（240 维）
+
+仓库里还有一套 **FeatureAgent2Adapted**（240 维扁平观测，移植自 Mahjong-LLM/sample.py），只在 `e16_safe_gate.py` / `e17_danger_gate.py` 里作为辅助使用，**不是训练主线**。交叉比对结果：
+
+```
+TILE_LIST 文字序列一致: True（W,T,B,F,J）
+ACT 索引定义一致: True（Pass/Hu/Play/Chi/Peng/Gang/AnGang/BuGang 全部同值）
+两边都判为决策点但不一致: 259 步；仅 A 判为决策点: 13 步；仅 C 判为决策点: 14 步
+```
+
+差异根源是 **`valid` 的生命周期不同**：38 平面版在「与自己无关的请求」后**保留上一次的 valid**，240 维版每次请求后显式重置为 `[Pass]`。所以两套的 `valid` 不能混用、也不能拿它当「当前是否轮到我决策」的判据。
+
+对本仓库无影响：`converter.py` 用自建的 `pending` 机制 + `obs['action_mask']` 判定决策点，只在「庄家起手 14 张」「摸花不补」两处手动构造 `valid`。
+
+附带收获：该文件注释 `W=Characters, T=Bamboo, B=Dots`，是 **T=索、B=筒** 的第三处独立印证（另两处：Botzone wiki、PyMahjongGB 源码 + 绿一色实验）。
