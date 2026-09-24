@@ -243,7 +243,7 @@ sudo ufw allow 80/tcp && sudo ufw allow 443/tcp
 
 ## 牌谱转换说明
 
-> 与 `open_mahjong_unity` 前端转换实现（`recordConvert/botzoneGuobiao.js`）的逐项对比、牌面字母 T/B 约定差异（**含本仓库 `tiles.py` 的待修映射问题**）与复现脚本，见 [`docs/salasasa-botzone-conversion.md`](docs/salasasa-botzone-conversion.md)。
+> 与 `open_mahjong_unity` 前端转换实现（`recordConvert/botzoneGuobiao.js`）的逐项对比、牌面字母 T/B 约定与复现脚本，见 [`docs/salasasa-botzone-conversion.md`](docs/salasasa-botzone-conversion.md)。
 
 后端将 salasasa 平台（open_mahjong）的 tick 流逐条喂给 IJCAI 推理引擎，关键约定：
 
@@ -283,11 +283,11 @@ PYTHONPATH=backend .venv/bin/python scripts/bench_step.py
 PYTHONPATH=backend .venv/bin/pytest tests/ -v
 ```
 
-27 个测试全过，含 `tests/test_e2e.py`（权重存在时跑真实模型推理，验证 round 2 viewer 0 首打 T1 概率 ≈ 0.959）。
+48 个测试全过，含 `tests/test_e2e.py`（权重存在时跑真实模型推理，校验 round 2 viewer 1 首打 `B1` 与 top-k 概率合法性）。
 
 ## 已知限制
 
-- **牌面字母 T/B 映射待修**：`backend/tiles.py` 把 21-29(筒) 映射为 `T`、31-39(索) 映射为 `B`，而 Botzone 官方约定与 PyMahjongGB 都是 **T=索、B=筒**。首打建议实测不受影响（11/11 一致），但概率分布差异可观，且绿一色/推不倒等花色敏感番型会算错。详见 [`docs/salasasa-botzone-conversion.md`](docs/salasasa-botzone-conversion.md) §3
+- **牌面字母 T/B 映射（已修正）**：`backend/tiles.py` 现按 Botzone 官方与 PyMahjongGB 的约定 **T=索、B=筒**（21-29→B、31-39→T）。此前的反向映射会让绿一色/推不倒等花色敏感番型算错、模型概率分布偏移，实测首选建议不受影响（11/11 一致）。磁盘缓存键含 `tiles.py`/`converter.py` 内容指纹，改转换逻辑后旧缓存自动失效。详见 [`docs/salasasa-botzone-conversion.md`](docs/salasasa-botzone-conversion.md) §3
 - **单学生模式**：默认三学生 ensemble；环境变量 `ENSEMBLE=1` 时仅加载 `kdens_s0_fp16.npz`（单学生，速度更快、精度略降）
 - **转换失败局/视角跳过**：个别牌谱数据异常（如起手剔花后 >14 张、鸣牌时手牌缺失）会导致该 viewer 转换失败，`prepare` 中标记 `error` 并跳过，不影响其他视角
 - **xunmuNodes seats 错位（遗留）**：前端回放引擎（来自 open_mahjong_unity）对 `xunmuNodes` 的 seats 字段存在已知错位 bug，仅影响部分回放视角的座位标注，不影响 AI 分析

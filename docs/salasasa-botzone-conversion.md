@@ -43,7 +43,7 @@ PYTHONPATH=backend .venv/bin/python scripts/compare_botzone_conversion.py --no-a
 | 错误处理 | 无校验，缺失用占位（`?? 11`、`?? h1`） | 起手张数校验→error；鸣牌前弃牌喂入失败→状态漂移 error |
 | 额外能力 | 反向转换、`hu_self/first/second/third` 归类、雀渣/MJAI 互转 | 决策点提取（`pending` + valid 掩码）、LRU 缓存键 |
 
-## 3. 发现一：牌面字母 T/B 语义相反（含本仓库的编码 bug）
+## 3. 发现一：牌面字母 T/B 语义（本仓库曾反写，**已修正**）
 
 ### 3.1 权威约定
 
@@ -64,27 +64,28 @@ PYTHONPATH=backend .venv/bin/python scripts/compare_botzone_conversion.py --no-a
 
   绿一色只由索子（2/3/4/6/8）+ 发组成，所以 **T=索、B=筒** 确认无疑。
 
-### 3.2 本仓库的映射写反了
+### 3.2 本仓库的映射曾写反（已修正）
 
-[`backend/tiles.py`](../backend/tiles.py)：
+修正前 [`backend/tiles.py`](../backend/tiles.py)：
 
 ```python
 table = {1: 'W', 2: 'T', 3: 'B', 4: 'F'}   # 21-29(筒)→T ✗  31-39(索)→B ✗
 ```
 
-正确应为 `{1: 'W', 2: 'B', 3: 'T', 4: 'F'}`（21-29 筒→B、31-39 索→T）。上游 `tiles.js` 的 `salasasaToBotzone` 是按官方约定写的（21-29→B、31-39→T），是对的。
+现为 `{1: 'W', 2: 'B', 3: 'T', 4: 'F'}`（21-29 筒→B、31-39 索→T）。上游 `tiles.js` 的 `salasasaToBotzone` 一直是按官方约定写的（21-29→B、31-39→T）。
 
-同一局同一手牌的双跑输出：
+修正前后的双跑输出（同一局同一手牌）：
 
 ```
 上游     1 1 0 1 1 T2 T3 B8 T3 B9 B6 B5 F1 J3 B7 B6 W2 W5 H4 H3 H6
                     ↑32   ↑28
-本仓库   Deal B2 B3 T8 B3 T9 T6 T5 F1 J3 T7 T6 W2 W5
+修正前   Deal B2 B3 T8 B3 T9 T6 T5 F1 J3 T7 T6 W2 W5      ← 32 被叫 B2、28 被叫 T8
                 ↑32  ↑28
+修正后   Deal T2 T3 B8 T3 B9 B6 B5 F1 J3 B7 B6 W2 W5      ← 与上游一致
 ```
 
-同一张 32（3索）上游叫 `T2`、本仓库叫 `B2`；同一张 28（8筒）上游叫 `B8`、本仓库叫 `T8`。
-字牌 `45/46/47 → J1/J3/J2`（中/白/发）两边一致。
+同一张 32（3索）修正前叫 `B2`、28（8筒）叫 `T8`，与上游相反；修正后两边一致。
+字牌 `45/46/47 → J1/J3/J2`（中/白/发）两边始终一致。
 
 ### 3.3 为什么「看起来还能用」
 
@@ -110,13 +111,15 @@ step 95 实际 4筒| 现状 3索 0.737 4筒 0.217 2索 0.015 | 修正 3索 0.731
 
 结论：**首选建议 11/11 不变**（结构同构的必然结果），但**概率分布差异可观**（step 79 的次选 8万 从 0.134 升到 0.284，翻倍；step 1 首选从 0.803 升到 0.855）。也就是说：AI 面板上「AI 认为该打什么」的排序基本可靠，但**概率置信度与次选排序不可靠**，且和牌/番型判定会错。
 
-### 3.5 修复方案（未实施）
+### 3.5 修复记录（已实施）
 
-1. [`backend/tiles.py`](../backend/tiles.py)：`table = {1: 'W', 2: 'B', 3: 'T', 4: 'F'}`；
+1. [`backend/tiles.py`](../backend/tiles.py)：`table = {1: 'W', 2: 'B', 3: 'T', 4: 'F'}`，并补上约定来源注释；
 2. [`web/src/views/game2d/Replay.vue`](../web/src/views/game2d/Replay.vue)：`AI_SUIT_PREFIX = { W: 1, T: 3, B: 2, F: 4 }`（T=索=3、B=筒=2）；
-3. [`backend/analyzer.py`](../backend/analyzer.py) 的 `_TILE_NAMES` 与 `engine/feature.py` 的 `TILE_LIST` **不要动**（必须与训练权重一致）；
-4. [`tests/test_e2e.py`](../tests/test_e2e.py) 的断言需同步（原断言基于错误映射的 `T1`）；
-5. README「牌谱转换说明」中「21→T1，筒非万」的描述要改成「21→B1」。
+3. [`backend/analyzer.py`](../backend/analyzer.py) 的 `_TILE_NAMES` 与 `engine/feature.py` 的 `TILE_LIST` **未动**（必须与训练权重一致，字母只是通道标签）；
+4. 测试断言同步：`test_tiles.py`（21→B1、31→T1）、`test_analyzer.py`、`test_api.py`（stub 偏好索引 9→18）、`test_cache_store.py`、`test_converter_replay.py`（29 处牌名互换）、`test_e2e.py`；全套 48 个测试通过；
+5. README「牌谱转换说明」「已知限制」「测试」三处描述同步。
+
+**附带修掉的缓存坑**：磁盘缓存键原先只含「牌谱 + 局 + 节点 + 视角」，改完映射后仍会读到按旧约定算出的结果（表现为 `actual_tile` 是新的、`ai_top` 却还是旧牌名）。现在 [`backend/main.py`](../backend/main.py) 把 `tiles.py` + `converter.py` 的**内容指纹**并进缓存键（`enc<sha1[:8]>|…`），改转换逻辑即自动失效，无需人工递增版本号、也不必手动清 `backend/cache/`。
 
 ## 4. 发现二：座位归属——状态机 vs 启发式猜测
 
@@ -147,10 +150,10 @@ reset 出现在首个 c 之前: 48/48
 ['bh', 54, 0, 'F'] ['bd', 44, 0] ['bh', 53, 2, 'F'] ['bd', 21, 2] ['bh', 56, 3, 'F'] ['bd', 32, 3] ['reset', 0] ['c', 44, 'T'] …
 ```
 
-- 上游转换器 `continue` 忽略；本仓库 converter 也忽略，但它用 `start_player_index` 初始化轮转 → **当前数据下等价**；
-- 而两边的**回放引擎**（`web/src/game2d/replay/recordReplay.ts`）是**以 `reset` 为准**（`currentPlayer = tick[1]`）→ 更健壮。
+- 上游转换器 `continue` 忽略；本仓库 converter 原先也忽略，但用 `start_player_index` 初始化轮转 → **当前数据下等价**；
+- 两边的**回放引擎**（`web/src/game2d/replay/recordReplay.ts`）是**以 `reset` 为准**（`currentPlayer = tick[1]`）→ 更健壮。
 
-建议：给 converter 补一行 `if a == 'reset': current = tick[1]`，成本极低，可防住「`reset[1] != start_player_index`」（寻摸/跳转类牌谱）的错位。
+**已实施**：[`backend/converter.py`](../backend/converter.py) 现以 `reset` 为准（`if a == 'reset': current = tick[1]`），与回放引擎一致，可防住「`reset[1] != start_player_index`」（寻摸/跳转类牌谱）的错位。
 
 ## 6. 各自独有
 

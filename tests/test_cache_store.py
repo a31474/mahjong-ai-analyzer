@@ -55,7 +55,7 @@ def test_analyzer_disk_hit_no_inference(tmp_path):
             calls.append(1)
             lg = np.zeros(235)
             lg[2:36] = 0.1
-            lg[2 + 9] = 1.0    # 偏好 T1
+            lg[2 + 18] = 1.0    # 偏好 B1（21=筒1，B 段起始索引 18）
             return lg
 
     disk = DiskCache(str(tmp_path))

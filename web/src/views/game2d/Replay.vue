@@ -1871,7 +1871,8 @@ async function submitInput() {
   }
 }
 
-const AI_SUIT_PREFIX: Record<string, number> = { W: 1, T: 2, B: 3, F: 4 }
+/** IJCAI/Botzone 花色字母 → salasasa 花色号：W=万、B=筒、T=索（见 backend/tiles.py）。 */
+const AI_SUIT_PREFIX: Record<string, number> = { W: 1, T: 3, B: 2, F: 4 }
 /** IJCAI 字牌 J1=中 J2=发 J3=白 → salasasa 字牌 rank z5/z6/z7（45中 46白 47发）。 */
 const AI_HONOR_RANK: Record<string, number> = { J1: 5, J2: 7, J3: 6 }
 

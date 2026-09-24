@@ -13,7 +13,7 @@
 做三件事:
   1) reset tick 统计: reset[1] 是否等于 start_player_index、是否出现在首个 c 之前
   2) 双跑对比: 上游 Botzone 行 vs 本仓库 converter 的 FeatureAgent request
-  3) A/B 推理: 现状映射(21-29→T) 与修正映射(21-29→B) 下模型对同一决策点的建议对比
+  3) 编码约定校验（converter.to_csm vs Botzone 官方/PyMahjongGB: B=筒、T=索）+ 模型建议
 """
 import argparse
 import glob
@@ -145,42 +145,39 @@ def cn_name(tid):
     return CN.get(tid, str(tid))
 
 
-def ab_compare(record_path, round_index):
+def encoding_and_topk(record_path, round_index):
+    """校验编码约定 + 给出模型对当前映射的建议。
+
+    历史上这里做的是「旧映射(21-29→T) vs 修正映射(21-29→B)」的 A/B 推理对比；
+    tiles.py 修正后两者已统一，改为对约定做断言式校验（上游/约定变化时立刻可见）。
+    """
     import numpy as np
+    import tiles
     import converter
     from analyzer import _TILE_NAMES
     from model_loader import load_model
+
+    mismatched = []
+    # 合法牌：11-19 万 / 21-29 筒 / 31-39 索 / 41-47 字（+ 赤宝 105/205/305）
+    probe = [t for t in range(11, 48) if t % 10 != 0] + [105, 205, 305]
+    for tid in probe:
+        if converter.to_csm(tid) != to_csm_fixed(tid):
+            mismatched.append((tid, converter.to_csm(tid), to_csm_fixed(tid)))
 
     src, rec = loads_record(record_path)
     g = converter.parse_record({'game_round': rec['game_round']}, src.get('game_id', ''),
                                src.get('players') or [], src.get('rule', 'guobiao'))
     round_rec = g.rounds[round_index - 1]
-    original = converter.to_csm
-
-    def replay(fixed):
-        converter.to_csm = to_csm_fixed if fixed else original
-        try:
-            return converter.replay_round(round_rec, 0)
-        finally:
-            converter.to_csm = original
-
     model = load_model(os.path.join(BACKEND, 'weights'))
-    ra_now, ra_fix = replay(False), replay(True)
-
-    def top3(node):
+    ra = converter.replay_round(round_rec, 0)
+    rows = []
+    for node in ra.nodes:
         obs = node.obs
         probs = np.asarray(model.logits(obs['observation'], obs['action_mask'])).flatten()
         legal = [(i, float(probs[i])) for i in range(2, 36) if obs['action_mask'][i] > 0]
         legal.sort(key=lambda x: -x[1])
-        return [(_TILE_NAMES[i - 2], v) for i, v in legal[:3]]
-
-    rows, same_top1 = [], 0
-    for na, nb in zip(ra_now.nodes, ra_fix.nodes):
-        ia = [(salasasa_id(t, False), p) for t, p in top3(na)]
-        ib = [(salasasa_id(t, True), p) for t, p in top3(nb)]
-        same_top1 += ia[0][0] == ib[0][0]
-        rows.append((na.step, salasasa_id(na.actual_tile, False), ia, ib))
-    return ra_now, ra_fix, rows, same_top1, model
+        rows.append((node.step, node.actual_tile, [(_TILE_NAMES[i - 2], v) for i, v in legal[:3]]))
+    return mismatched, rows, ra
 
 
 # ---------------------------------------------------------------- main
@@ -222,21 +219,23 @@ def main():
         return
     print()
     print('=' * 78)
-    print('3) A/B 推理对比（现状映射 21-29→T  vs  修正映射 21-29→B）')
+    print('3) 编码约定校验 + 模型建议')
     print('=' * 78)
     try:
-        ra_now, ra_fix, rows, same_top1, _model = ab_compare(args.record, args.round)
+        mismatched, rows, ra = encoding_and_topk(args.record, args.round)
     except Exception as exc:                                     # 权重缺失等
-        print('跳过 A/B（%s）' % exc)
+        print('跳过（%s）' % exc)
         return
-    print('节点数 现状=%d 修正=%d' % (len(ra_now.nodes), len(ra_fix.nodes)))
-    for step, actual, ia, ib in rows:
-        mark = '' if ia[0][0] == ib[0][0] else '  <-- 首选不同'
-        print('step %-4d 实际 %-4s | 现状 %s | 修正 %s%s' % (
-            step, cn_name(actual),
-            ' '.join('%s %.3f' % (cn_name(i), p) for i, p in ia),
-            ' '.join('%s %.3f' % (cn_name(i), p) for i, p in ib), mark))
-    print('首选一致: %d/%d' % (same_top1, len(rows)))
+    if mismatched:
+        print('!! converter.to_csm 与 Botzone 约定(PyMahjongGB)不一致: %s' % mismatched)
+    else:
+        print('converter.to_csm 与 Botzone 约定一致（W=万、B=筒、T=索；含赤宝共 %d 张）' % 37)
+    print('决策点 %d 个：' % len(rows))
+    for step, actual, top in rows:
+        tile_id = salasasa_id(actual, True)
+        print('step %-4d 实际 %-4s | %s' % (
+            step, cn_name(tile_id),
+            ' '.join('%s %.3f' % (cn_name(salasasa_id(t, True)), p) for t, p in top)))
 
 
 if __name__ == '__main__':

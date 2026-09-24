@@ -152,6 +152,13 @@ def replay_round(round_rec, viewer):
     try:
         for step, tick in enumerate(round_rec.action_ticks):
             a = tick[0]
+            if a == 'reset':
+                # 重置事件（开局补花结束后/跳转）：显式声明当前行动者（player_index 域）。
+                # 前端回放引擎同样以 tick[1] 为准；实测 48/48 局与 start_player_index 相等，
+                # 以 reset 为准可兼容二者不一致的牌谱（寻摸/跳转类）。
+                if len(tick) > 1 and isinstance(tick[1], int):
+                    current = tick[1]
+                continue
             if a == 'bh':
                 # 补花不改变摸/打轮转（打牌者由 start_player_index 起轮转），仅记录补花者
                 if len(tick) > 2 and isinstance(tick[2], int):

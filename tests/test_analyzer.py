@@ -28,7 +28,7 @@ def test_prepare_meta():
     vw = r2['viewers'][1]                        # original 1 = player_index 0（本局摸打者）
     assert vw['error'] is None
     node = vw['nodes'][0]
-    assert node['actual_tile'] == 'T1'
+    assert node['actual_tile'] == 'B1'           # 21 = 1筒 → B1（T=索、B=筒）
     assert 'obs' not in node
 
 def test_analyze_step_topk():
@@ -37,7 +37,7 @@ def test_analyze_step_topk():
     a = Analyzer(StubModel())
     r2 = [r for r in prep['rounds'] if r['round_index'] == 2][0]
     out = a.analyze_step(prep, round_index=2, step=r2['viewers'][1]['nodes'][0]['step'], viewer=1)
-    assert out['actual_tile'] == 'T1'
+    assert out['actual_tile'] == 'B1'
     assert len(out['ai_top']) >= 3
     probs = [x['prob'] for x in out['ai_top']]
     assert all(0 <= p <= 1 for p in probs)

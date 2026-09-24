@@ -9,7 +9,7 @@ def _load():
 class _StubModel:
     def logits(self, obs, mask):
         import numpy as np
-        lg = np.zeros(235); lg[2:36] = 0.1; lg[2 + 9] = 1.0  # 偏好 T1（tile_id 21=筒1，模型 Play 段索引 9）
+        lg = np.zeros(235); lg[2:36] = 0.1; lg[2 + 18] = 1.0  # 偏好 B1（tile_id 21=筒1，B 段起始索引 18）
         m = np.asarray(mask, dtype=np.float32)
         lg = np.where(m > 0, lg, -1e30)
         lg = lg - lg.max()
@@ -35,8 +35,8 @@ def test_prepare_then_step(monkeypatch):
                     params={'round': node and meta['rounds'][1]['round_index'],
                             'step': node['step'], 'viewer': 1})
     assert r2.status_code == 200
-    assert r2.json()['actual_tile'] == 'T1'
-    assert r2.json()['ai_top'][0]['tile'] == 'T1'
+    assert r2.json()['actual_tile'] == 'B1'
+    assert r2.json()['ai_top'][0]['tile'] == 'B1'
 
 def test_unknown_aid_404(monkeypatch):
     _patch(monkeypatch)

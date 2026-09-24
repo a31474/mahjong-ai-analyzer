@@ -22,7 +22,7 @@ def test_replay_example_round2():
     assert ra.seat_wind == 0
     assert len(ra.nodes) == 1
     n = ra.nodes[0]
-    assert n.actual_tile == 'T1'             # 21 -> T1（万11-19/筒21-29，见 test_tiles.CASES）
+    assert n.actual_tile == 'B1'             # 21 -> B1（万11-19/筒21-29，见 test_tiles.CASES）
     assert n.ok
 
 def test_replay_other_viewer_no_node():
@@ -57,11 +57,11 @@ def test_own_discard_claimed_by_next_does_not_crash():
     # remove 会 ValueError 崩掉整局。应防御跳过补喂，保留 viewer 打 W4 的决策点。
     from converter import RoundRecord
     ticks = [
-        ['d', 21],                 # step0: viewer 摸 T1
+        ['d', 21],                 # step0: viewer 摸 B1
         ['c', 14, 'T'],            # step1: viewer 打 W4 -> 决策点(step0)
         ['cl', 14, 1, 12, 13],     # step2: 下家(1) cl 吃 W4（中间张 W3）
-        ['c', 21, 'T'],            # step3: 玩家1 打 T1
-        ['d', 31], ['c', 31, 'B'], # 玩家2 摸打 B1
+        ['c', 21, 'T'],            # step3: 玩家1 打 B1
+        ['d', 31], ['c', 31, 'B'], # 玩家2 摸打 T1
         ['d', 41], ['c', 41, 'F'], # 玩家3 摸打 F1
         ['d', 42], ['c', 42, 'F'], # step8/9: viewer 摸 F2 打 F2 -> 决策点(step8)
         ['liuju'],
@@ -85,13 +85,13 @@ def test_bd_buflower_draw_to_claimant():
     from converter import RoundRecord
     ticks = [
         ['bh', 53, 2],             # step0: 玩家2 补花（轮转仍从 start_player 0 开始）
-        ['bd', 21, 2],             # step1: 玩家2 补摸 T1
-        ['d', 31],                 # step2: 玩家0 摸 B1
-        ['c', 31, 'T'],            # step3: 玩家0 打 B1
+        ['bd', 21, 2],             # step1: 玩家2 补摸 B1
+        ['d', 31],                 # step2: 玩家0 摸 T1
+        ['c', 31, 'T'],            # step3: 玩家0 打 T1
         ['d', 42],                 # step4: 玩家1 摸 F2
         ['c', 42, 'T'],            # step5: 玩家1 打 F2
-        ['d', 21],                 # step6: 玩家2 摸 T1
-        ['c', 21, 'T'],            # step7: 玩家2 打 T1 -> 决策点(step1, draw=T1)
+        ['d', 21],                 # step6: 玩家2 摸 B1
+        ['c', 21, 'T'],            # step7: 玩家2 打 B1 -> 决策点(step1, draw=B1)
         ['liuju'],
     ]
     fake = RoundRecord(
@@ -104,7 +104,7 @@ def test_bd_buflower_draw_to_claimant():
     assert len(ra.nodes) == 1
     assert ra.nodes[0].seat == 2
     assert ra.nodes[0].step == 6
-    assert ra.nodes[0].actual_tile == 'T1'
+    assert ra.nodes[0].actual_tile == 'B1'
 
 # ---------- 吃牌（cl/cm/cr）顺子中间张换算 ----------
 
@@ -119,12 +119,12 @@ def _chi_fake(ticks):
 def _chi_789_ticks(claim):
     # viewer 手牌含 7/8（万）；玩家1 弃 9（万）后 viewer cl 吃（弃 9 是顺子右端）。
     return [
-        ['d', 22],                 # step0: viewer 摸 T2
-        ['c', 22, 'T'],            # step1: viewer 打 T2 -> 决策点(step0)
+        ['d', 22],                 # step0: viewer 摸 B2
+        ['c', 22, 'T'],            # step1: viewer 打 B2 -> 决策点(step0)
         ['d', 19],                 # step2: 玩家1 摸 W9
         ['c', 19, 'T'],            # step3: 玩家1 弃 W9
         [claim, 19, 0],            # step4: viewer 吃 9
-        ['c', 21, 'T'],            # step5: viewer 打 T1 -> 决策点(step4)
+        ['c', 21, 'T'],            # step5: viewer 打 B1 -> 决策点(step4)
         ['liuju'],
     ]
 
@@ -134,7 +134,7 @@ def test_chi_cl_discard9_boundary():
     assert ra.error is None
     assert len(ra.nodes) == 2
     n = ra.nodes[1]
-    assert n.step == 4 and n.actual_tile == 'T1'
+    assert n.step == 4 and n.actual_tile == 'B1'
     assert n.melds == [['CHI', 'W8', 3]]     # offer 3 = cl（弃牌是右端）
     assert n.draw is None
 
@@ -152,19 +152,19 @@ def test_chi_normalized_discard_id():
 def test_chi_cr_discard1_boundary():
     # cr 弃 1（吃 123 边界）：中间张 = 1+1 = W2，顺子展开 W1W2W3。
     ticks = [
-        ['d', 22],                 # step0: viewer 摸 T2
-        ['c', 22, 'T'],            # step1: viewer 打 T2
+        ['d', 22],                 # step0: viewer 摸 B2
+        ['c', 22, 'T'],            # step1: viewer 打 B2
         ['d', 11],                 # step2: 玩家1 摸 W1
         ['c', 11, 'T'],            # step3: 玩家1 弃 W1
         ['cr', 11, 0],             # step4: viewer cr 吃 1
-        ['c', 21, 'T'],            # step5: viewer 打 T1 -> 决策点(step4)
+        ['c', 21, 'T'],            # step5: viewer 打 B1 -> 决策点(step4)
         ['liuju'],
     ]
     ra = replay_round(_chi_fake(ticks), viewer=0)
     assert ra.error is None
     assert len(ra.nodes) == 2
     n = ra.nodes[1]
-    assert n.step == 4 and n.actual_tile == 'T1'
+    assert n.step == 4 and n.actual_tile == 'B1'
     assert n.melds == [['CHI', 'W2', 1]]     # offer 1 = cr（弃牌是左端）
 
 def test_chi_cr_discard9_boundary_defense():
@@ -180,14 +180,14 @@ def test_meld_branch_no_duplicate_discard_feed():
     # 修复后 W9 在玩家1 弃牌段只计 1 次。
     from converter import RoundRecord
     ticks = [
-        ['d', 22],                  # step0: viewer(0) 摸 T2
-        ['c', 22, 'T'],             # step1: viewer 打 T2 -> 决策点(step0)
+        ['d', 22],                  # step0: viewer(0) 摸 B2
+        ['c', 22, 'T'],             # step1: viewer 打 B2 -> 决策点(step0)
         ['d', 19],                  # step2: 玩家1 摸 W9
         ['c', 19, 'T'],             # step3: 玩家1 弃 W9
         ['cl', 19, 2, 17, 18],      # step4: 玩家2 cl 吃 W9（中间张 W8）
-        ['c', 21, 'T'],             # step5: 玩家2 打 T1
-        ['d', 31], ['c', 31, 'B'],  # step6/7: 玩家3 摸打 B1
-        ['d', 22], ['c', 21, 'T'],  # step8/9: viewer 摸 T2 打 T1 -> 决策点(step8)
+        ['c', 21, 'T'],             # step5: 玩家2 打 B1
+        ['d', 31], ['c', 31, 'B'],  # step6/7: 玩家3 摸打 T1
+        ['d', 22], ['c', 21, 'T'],  # step8/9: viewer 摸 B2 打 B1 -> 决策点(step8)
         ['liuju'],
     ]
     fake = RoundRecord(
@@ -220,7 +220,7 @@ def test_flower_discard_does_not_crash():
     ra1 = replay_round(fake, viewer=1)
     assert ra1.error is None
     assert len(ra1.nodes) == 1
-    assert ra1.nodes[0].actual_tile == 'T1'
+    assert ra1.nodes[0].actual_tile == 'B1'
 
 
 def test_flower_kept_then_discard_numeral_is_decision():
@@ -239,7 +239,7 @@ def test_flower_kept_then_discard_numeral_is_decision():
     assert n0.draw is None
     ra1 = replay_round(fake, viewer=1)
     assert len(ra1.nodes) == 1
-    assert ra1.nodes[0].actual_tile == 'T1'          # player 1 正常摸打
+    assert ra1.nodes[0].actual_tile == 'B1'          # player 1 正常摸打
 
 
 def test_cuohe_round_continues():
@@ -256,7 +256,7 @@ def test_cuohe_round_continues():
     ra2 = replay_round(fake, viewer=2)
     assert ra2.error is None
     assert len(ra2.nodes) == 1            # player2 打 22 的决策点（错和后续）
-    assert ra2.nodes[0].actual_tile == 'T2'
+    assert ra2.nodes[0].actual_tile == 'B2'
 
 def test_normalized_tile_id_in_draw_and_discard():
     """归一化 id（≥100，赤五）在 d/c 事件中不崩溃（105→15 万5）。"""

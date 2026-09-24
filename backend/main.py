@@ -31,13 +31,31 @@ _CACHE_DIR = os.path.join(os.path.dirname(__file__), 'cache')
 _STEP_DISK = DiskCache(_CACHE_DIR)                                  # 单步分析结果
 _RECORD_DISK = DiskCache(os.path.join(_CACHE_DIR, 'record'), file_cap=200)  # 牌谱原始 JSON
 
+# 转换逻辑指纹：tiles.py / converter.py 的内容变化会让磁盘缓存自动失效。
+# 曾经用手工版本号，结果"改了牌面映射却忘了递增"时读到按旧约定算出的缓存结果
+# （表现为测试里 actual_tile 是新的、ai_top 却还是旧的牌名）。
+def _transform_fingerprint():
+    digest = hashlib.sha1()
+    here = os.path.dirname(os.path.abspath(__file__))
+    for name in ('tiles.py', 'converter.py'):
+        try:
+            with open(os.path.join(here, name), 'rb') as f:
+                digest.update(f.read())
+        except OSError:
+            pass
+    return digest.hexdigest()[:8]
+
+_TRANSFORM_VERSION = 'enc' + _transform_fingerprint()
+
 def _record_cache_key(record, game_id):
     """持久化缓存键：game_id 路径加 'gid:' 前缀（防与上传 sha1 键碰撞）；上传路径用内容 sha1。"""
     if game_id and game_id != 'upload':
-        return 'gid:' + game_id
-    return 'sha1:' + hashlib.sha1(
-        json.dumps(record, sort_keys=True, ensure_ascii=False).encode('utf-8')
-    ).hexdigest()
+        base = 'gid:' + game_id
+    else:
+        base = 'sha1:' + hashlib.sha1(
+            json.dumps(record, sort_keys=True, ensure_ascii=False).encode('utf-8')
+        ).hexdigest()
+    return _TRANSFORM_VERSION + '|' + base
 
 def _load_record(game_id, platform):
     """牌谱磁盘缓存：命中直接返回（跳过平台拉取），未命中拉取并存盘。"""

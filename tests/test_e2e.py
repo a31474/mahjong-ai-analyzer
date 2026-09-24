@@ -22,6 +22,6 @@ def test_real_model_roundtrip():
                                         'T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9',
                                         'B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B9',
                                         'F1', 'F2', 'F3', 'F4', 'J1', 'J2', 'J3')
-    assert out['actual_tile'] == 'T1'
+    assert out['actual_tile'] == 'B1'          # 21 = 1筒 → B1（T=索、B=筒）
     assert isinstance(out['agree'], bool)
     assert 0 <= out['ai_top'][0]['prob'] <= 1

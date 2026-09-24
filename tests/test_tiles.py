@@ -1,7 +1,7 @@
 import pytest
 from tiles import to_csm, is_flower, FLOWER_IDS
 
-CASES = {11: 'W1', 19: 'W9', 21: 'T1', 29: 'T9', 31: 'B1', 39: 'B9',
+CASES = {11: 'W1', 19: 'W9', 21: 'B1', 29: 'B9', 31: 'T1', 39: 'T9',
          41: 'F1', 42: 'F2', 43: 'F3', 44: 'F4', 45: 'J1', 46: 'J3', 47: 'J2'}
 
 def test_suits_and_honors():
