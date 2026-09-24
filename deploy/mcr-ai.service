@@ -1,0 +1,42 @@
+# mcr-ai 用户级 systemd unit 模板（mahjong-ai-analyzer）
+#
+# 安装（把 <APP_DIR> 换成仓库绝对路径，例如 /home/aliyun314/project/mahjong-ai-analyzer）：
+#   mkdir -p ~/.config/systemd/user
+#   cp deploy/mcr-ai.service ~/.config/systemd/user/mcr-ai.service
+#   sed -i "s#<APP_DIR>#$PWD#g" ~/.config/systemd/user/mcr-ai.service
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now mcr-ai
+#   loginctl enable-linger "$USER"        # 关键：注销/重启后仍保持运行
+#
+# 验证：
+#   systemctl --user status mcr-ai
+#   curl -s http://127.0.0.1:8000/api/health     # {"status":"ok","model":"ready"}
+#
+# 想改成系统级 unit（/etc/systemd/system/mcr-ai.service）时：
+#   - 去掉所有 systemctl/日志命令里的 --user
+#   - [Install] 的 WantedBy 改为 multi-user.target
+#   - 在 [Service] 里加 User=<账号> / Group=<账号>
+
+[Unit]
+Description=mcr-ai mahjong analyzer
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=<APP_DIR>
+Environment=PYTHONPATH=backend
+Environment=PYTHONUNBUFFERED=1
+# 单学生模式更快（精度略降）；要用三学生 ensemble 就注释掉这行，并预留 ~80MB 权重内存
+#Environment=ENSEMBLE=1
+# 用 python -m uvicorn 而不是直接执行 .venv/bin/uvicorn：不依赖 shebang 里的解释器路径
+ExecStart=<APP_DIR>/.venv/bin/python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
+# 启动自检：/api/health 返回 200（模型加载完成）才算启动成功，失败则 systemd 判 failed 并重启
+ExecStartPost=<APP_DIR>/scripts/healthcheck.sh
+TimeoutStartSec=180
+Restart=always
+RestartSec=3
+# 单核小内存机器可加硬上限，避免异常时跑飞
+#MemoryMax=1G
+
+[Install]
+WantedBy=default.target

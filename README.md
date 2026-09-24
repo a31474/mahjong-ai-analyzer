@@ -64,6 +64,8 @@ cd ..
 
 ## 部署到服务器
 
+> 可直接使用的模板与排错表：[`docs/deployment.md`](docs/deployment.md)（systemd unit 模板 [`deploy/mcr-ai.service`](deploy/mcr-ai.service)、nginx 配置模板 [`deploy/nginx.conf`](deploy/nginx.conf)）。下面是最小步骤。
+
 ### 前置要求（服务器）
 
 - Linux x86_64，`git`、`uv`、`gcc`/`g++`（编译 PyMahjongGB 扩展）、`curl`（下载权重）
