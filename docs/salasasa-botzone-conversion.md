@@ -28,6 +28,8 @@ PYTHONPATH=backend .venv/bin/python scripts/compare_botzone_conversion.py --no-a
 
 本仓库的 engine 直接来自 `mcr-ai/IJCAI-mahjong/deploy/caiest_cnn`，其 Botzone 入口把官方 request 逐条转成 FeatureAgent request（`process()`：`t[0]=='1'` → `Deal`，`'2'` → `Draw`，`'3'` → `Player N …`）。**本仓库的 `converter.py` 是把 salasasa tick 转成同一套 FeatureAgent request**，等于把「Botzone 官方协议 → FeatureAgent」这一步换成了「salasasa tick → FeatureAgent」。
 
+> 同一仓库的 `eval/replay_harness.py:reconstruct()` 干的是更接近的一层：直接吃 **Botzone 对局日志的 display 流**，为 4 家各建一个 `FeatureAgent` 并喂 `Wind/Deal/Draw/Player N …`（训练语料与评测都走它）。`converter.py` 与它同层，只是输入源换成 salasasa tick——**这也是为什么牌面字母必须与 Botzone 一致**。
+
 ## 2. 逐项对比
 
 | 维度 | 上游 botzoneGuobiao | 本仓库 converter |
@@ -63,6 +65,13 @@ PYTHONPATH=backend .venv/bin/python scripts/compare_botzone_conversion.py --no-a
   ```
 
   绿一色只由索子（2/3/4/6/8）+ 发组成，所以 **T=索、B=筒** 确认无疑。
+- **训练/评测侧的输入编码**（IJCAI-mahjong 仓库内的直接证据，而非推断）：
+  - `eval/replay_harness.py` 的 `reconstruct()` 是「Botzone 对局日志 → FeatureAgent request」的官方实现：`Wind <quan>` / `Deal <hands[s]>` / `Draw <tile>` / 摸牌者看真牌、其余家只收 `Player N Draw`——**牌串直接取自 Botzone display**；
+  - `train/caiest_repro/data/parse_botzone_logs.py` 用同一套 display 流重建训练语料；
+  - `deploy/caiest_cnn/test_obs_parity.py`（GOLD TEST）同样把 display 的 `hand`/`tile` 原样喂 `FeatureAgent`；
+  - `deploy/caiest_cnn/feature.py` 与本仓库 `backend/engine/feature.py` **字节一致**（`diff -q` 无差异）。
+
+  ⇒ 训练与推理共用 Botzone 牌串约定；本仓库 `converter.py` 实质是把 `replay_harness` 的输入从「Botzone 日志」换成「salasasa tick」，所以必须用同一套字母。
 
 ### 3.2 本仓库的映射曾写反（已修正）
 
@@ -186,7 +195,14 @@ reset 出现在首个 c 之前: 48/48
 |---|---|
 | `mcr-ai/PyMahjongGB/MahjongGB/mahjong-algorithm/tile.h` | 牌值枚举（`TILE_1m/TILE_1s/TILE_1p`）——T/B 语义的源码级依据 |
 | `mcr-ai/PyMahjongGB/MahjongGB/mahjong.cpp` | `tile2str[34]` 字符串表 |
-| `mcr-ai/IJCAI-mahjong/deploy/caiest_cnn/__main__.py` | 原版 Botzone bot：官方 request → FeatureAgent request 的权威适配（本仓库 converter 的「对偶」） |
+| `mcr-ai/IJCAI-mahjong/eval/replay_harness.py` | **「Botzone 对局日志 → FeatureAgent request」的官方实现**（`reconstruct()`），本仓库 `converter.py` 的同层对照 |
+| `mcr-ai/IJCAI-mahjong/deploy/caiest_cnn/__main__.py` | 冠军 bot 的 Botzone 入口：官方 per-request 协议 → FeatureAgent request |
+| `mcr-ai/IJCAI-mahjong/deploy/caiest_cnn/test_obs_parity.py` | GOLD TEST：把 Botzone display 的 `hand`/`tile` 原样喂 `FeatureAgent`，佐证训练/推理共用牌串 |
+| `mcr-ai/IJCAI-mahjong/train/caiest_repro/data/parse_botzone_logs.py` | 训练语料解析（同一套 display 流），说明训练输入编码 |
+| `mcr-ai/IJCAI-mahjong/deploy/caiest_cnn/feature.py` | 与本仓库 `backend/engine/feature.py` 字节一致（`TILE_LIST = W,T,B,F,J`） |
 | `mcr-ai/IJCAI-mahjong/bot/botzone_engine.py` | 同一适配的精简版（stdin/stdout 协议循环） |
+| `mcr-ai/IJCAI-mahjong/AGENTS.md` | 评测纪律与 Botzone 部署约束（Python 3.6 / torch 1.4 / ≤512MB / ~6s；Storage `data/` 跨 bot 共享） |
 | `mcr-ai/Chinese-Standard-Mahjong/` | 官方规则与裁判程序 |
 | `mcr-ai/rule.md` | 国标规则要点（144 张、不设连庄、截和制等） |
+
+> 注：`campaign/ludus_rl/docs/07_BOTZONE_PARITY.md` 讲的是自研平台与 Botzone 的**功能对照**，`doc/blog_2026-06-05_parity-mirage.md` 讲**评测方法论**（同源对手导致的 parity 陷阱），二者与牌谱转换无关，仅作背景。
