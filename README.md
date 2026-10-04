@@ -36,10 +36,10 @@
 - `backend/analyzer.py`：prepare（转换全部回合/视角）+ analyze_step（单节点推理，LRU 缓存）
 - `backend/model_loader.py`：三学生 ensemble 加载（`ENSEMBLE=1` 时单学生）
 - `web/`：Vue 3 + PixiJS 前端（回放引擎来自 open_mahjong_unity）
-  - 2D 回放界面已同步上游 `open_mahjong_unity` 提交 `4db27ac0`（dev ver 0.4.76.6，2026-09-17）：`web/src/game2d/`、`web/src/views/game2d/`、`web/src/constants/`、`web/src/i18n/`、`web/public/game2d-assets/`
+  - 2D 回放界面来自上游 `open_mahjong_unity`：`web/src/game2d/`、`web/src/views/game2d/`、`web/src/constants/`、`web/src/i18n/`、`web/public/game2d-assets/`。**当前同步点 `1a76ab42`（dev ver 0.4.78.1，2026-10-04）**；自 0.4.77 起上游改动以其他麻将规则/复式/站点功能为主，本项目按「只摘通用修复」增量同步，判定原则与历史见 [`docs/upstream-sync.md`](docs/upstream-sync.md)
   - 本地定制（上游同步时保留）：`web/src/game2d/ai/api.ts`（AI 接口）、`Replay.vue` 的 AI 复盘面板（默认右上角，拖动标题可移动、位置记在 `localStorage`、双击标题复位）与牌谱输入页、`salasasa/api.ts` 精简（去掉站点登录相关接口）、`replay/recordReplay.ts` 的最终分缺失兜底
-  - 未同步的上游改动：`@/utils/localGameRecordStore`（Unity 客户端本地牌谱库）与 `@/utils/recordShareLink`（站点 2D/3D 分享链接）相关逻辑——本服务无对应页面与存储，保留原有加载/分享实现
-- 相关文档：[`docs/deployment.md`](docs/deployment.md)（部署教程、自检清单、排错表）、[`docs/salasasa-botzone-conversion.md`](docs/salasasa-botzone-conversion.md)（与上游转换实现的逐项对比、牌面编码约定、观测一致性验证）
+  - 未同步的上游改动：`@/utils/localGameRecordStore`、`@/utils/recordShareLink`、`@/stores/playerAuth`、其他麻将规则（川麻/杭州/贵州/温州/红中/长春/广东等）与复式赛制相关逻辑——本服务无对应页面、存储与规则支持
+- 相关文档：[`docs/upstream-sync.md`](docs/upstream-sync.md)（上游同步策略/工具/历史）、[`docs/deployment.md`](docs/deployment.md)（部署教程、自检清单、排错表）、[`docs/salasasa-botzone-conversion.md`](docs/salasasa-botzone-conversion.md)（与上游转换实现的逐项对比、牌面编码约定、观测一致性验证）
 
 ## 运行步骤
 
@@ -248,6 +248,7 @@ PYTHONPATH=backend .venv/bin/pytest tests/ -v
 | `scripts/compare_botzone_conversion.py` | 对比上游 `recordConvert/botzoneGuobiao.js` 与本仓库 `converter.py`：reset tick 统计、双跑输出、牌面编码约定校验 |
 | `scripts/upstream_botzone_lines.mjs` | 被上一个脚本调用：用上游实现导出指定小局的 Botzone 协议行 |
 | `scripts/verify_feature_parity.py` | 观测 parity：本仓库 `engine/feature.py` 与 IJCAI 训练主线（源码 sha1 + 运行时 obs 逐位/valid 比对） |
+| `scripts/scan_upstream_web_changes.py` | 上游 web 界面更新扫描：变更清单 + diff 规模 + 缺失依赖自动打标（站点专属/其他规则/需人工判断），用于决定同步范围 |
 
 ```bash
 # 转换实现对比（上游仓库默认 ../open_mahjong_unity，可用 OPEN_MAHJONG_UNITY 覆盖）
@@ -255,6 +256,9 @@ PYTHONPATH=backend .venv/bin/python scripts/compare_botzone_conversion.py
 
 # 观测一致性（IJCAI 仓库默认 ../mcr-ai/IJCAI-mahjong，可用 --ijcai 覆盖）
 PYTHONPATH=backend .venv/bin/python scripts/verify_feature_parity.py --rounds 3
+
+# 上游 2D 界面更新扫描（--from 省略时读 docs/upstream-sync.md 的「当前同步点」）
+.venv/bin/python scripts/scan_upstream_web_changes.py --from 1a76ab42
 ```
 
 结论见 [`docs/salasasa-botzone-conversion.md`](docs/salasasa-botzone-conversion.md)：转换实现逐项对比（§2–§5）、观测一致性验证（§9）。
@@ -269,7 +273,7 @@ PYTHONPATH=backend .venv/bin/python scripts/verify_feature_parity.py --rounds 3
 ## 许可与出处
 
 - `backend/engine/`：来自 IJCAI-mahjong 竞赛代码（mcr-ai/IJCAI-mahjong/deploy/caiest_cnn），**无 LICENSE**，仅作研究用途
-- `web/src/game2d/`、`web/src/views/game2d/`、`web/public/game2d-assets/`：2D 回放界面来自 `open_mahjong_unity`（前端），MIT 许可；同步基线 `cbd226d7`（dev ver 0.4.75.7），当前同步至 `4db27ac0`（dev ver 0.4.76.6）
+- `web/src/game2d/`、`web/src/views/game2d/`、`web/public/game2d-assets/`：2D 回放界面来自 `open_mahjong_unity`（前端），MIT 许可；初次同步基线 `cbd226d7`（dev ver 0.4.75.7），**当前同步点 `1a76ab42`（dev ver 0.4.78.1）**，同步策略与历史见 [`docs/upstream-sync.md`](docs/upstream-sync.md)
 - `web/public/game2d-assets/`：音效/贴图资产，见 `game2d-assets/sounds/ATTRIBUTION.md`
 - 模型权重 `backend/weights/*.npz`：来自 HuggingFace `Dannibal/ijcai-mahjong-ckpts-2026`（champion/ 目录，IJCAI-2026 亚军 bot kdens3），见 `backend/weights/README.md`；权重不入库，需 `bash backend/fetch_weights.sh` 下载
 - 牌谱数据：salasasa.cn 平台公开对局

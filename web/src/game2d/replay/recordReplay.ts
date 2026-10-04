@@ -77,7 +77,8 @@ function bool(value: unknown): boolean {
 }
 
 function normalizedTile(tile: number): number {
-  return tile >= 100 ? tile % 100 : tile
+  // 赤五（105/205/305）单独映射回 15/25/35；其余 id 原样返回（上游 0.4.78 起）
+  return tile === 105 ? 15 : tile === 205 ? 25 : tile === 305 ? 35 : tile
 }
 
 function removeExactOrNormalized(tiles: number[], tile: number): number | null {
