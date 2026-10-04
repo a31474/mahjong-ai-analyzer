@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 import re
+import threading
 import uuid
 from collections import OrderedDict
 from fastapi import FastAPI, HTTPException
@@ -26,6 +27,11 @@ _MODEL_ERR = None
 _ANALYZER = None
 _prep_cache = OrderedDict()
 _PREP_CAP = 20
+# 同步路由跑在线程池里（真并发）：_prep_cache 的插入/淘汰/读回需要互斥，否则可能
+# 读到被其他请求淘汰的 aid（KeyError → 500）。prepare 本身耗时，放在锁外执行，
+# 只在插入+淘汰时持锁。模型首次加载同理，避免并发请求各加载一份（内存翻倍）。
+_PREP_LOCK = threading.Lock()
+_MODEL_LOCK = threading.Lock()
 # 磁盘持久化（backend/cache/，gitignore）：重启后同一牌谱免重复推理/拉取
 _CACHE_DIR = os.path.join(os.path.dirname(__file__), 'cache')
 # 分析结果按「局」聚合：一个文件存该局所有 (step, viewer) 的结果（原为每步一个文件）
@@ -74,14 +80,15 @@ def _load_record(game_id, platform):
 
 def _get_model():
     global _MODEL, _MODEL_ERR
-    if _MODEL is None and _MODEL_ERR is None:
-        try:
-            _MODEL = load_model(os.path.join(os.path.dirname(__file__), 'weights'))
-        except ModelMissingError as e:
-            _MODEL_ERR = str(e)
-    if _MODEL is None:
-        raise HTTPException(status_code=503, detail=_MODEL_ERR or 'model not ready')
-    return _MODEL
+    with _MODEL_LOCK:
+        if _MODEL is None and _MODEL_ERR is None:
+            try:
+                _MODEL = load_model(os.path.join(os.path.dirname(__file__), 'weights'))
+            except ModelMissingError as e:
+                _MODEL_ERR = str(e)
+        if _MODEL is None:
+            raise HTTPException(status_code=503, detail=_MODEL_ERR or 'model not ready')
+        return _MODEL
 
 @app.get('/api/health')
 def api_health():
@@ -121,11 +128,12 @@ def api_prepare(body: PrepareBody):
         raise HTTPException(status_code=400, detail='需要 game_id 或 record')
     aid = uuid.uuid4().hex[:12]
     ckey = _record_cache_key(record, game_id)
-    _prep_cache[aid] = prepare(record, game_id, rule, players, cache_key=ckey)
-    _prep_cache.move_to_end(aid)
-    while len(_prep_cache) > _PREP_CAP:
-        _prep_cache.popitem(last=False)
-    meta = _prep_cache[aid]
+    meta = prepare(record, game_id, rule, players, cache_key=ckey)
+    with _PREP_LOCK:
+        _prep_cache[aid] = meta
+        _prep_cache.move_to_end(aid)
+        while len(_prep_cache) > _PREP_CAP:
+            _prep_cache.popitem(last=False)
     # record 随响应返回：前端渲染回放需要完整牌谱（上传时前端已有，game_id 拉取时没有）
     return {'analysis_id': aid, 'meta': meta, 'record': record}
 

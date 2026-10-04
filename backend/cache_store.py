@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import tempfile
+import threading
 from collections import OrderedDict
 
 
@@ -87,6 +88,10 @@ class RoundCache:
         self.legacy = legacy
         self.mem_cap = mem_cap
         self.mem = OrderedDict()
+        # 并发保护：FastAPI 同步路由在线程池里真并发。get/put 全程持锁（含磁盘
+        # 读写的毫秒级开销）——单核服务无感，但避免 mem 的 move_to_end/popitem
+        # 交错抛 KeyError，也避免「读到 bucket 后被淘汰」导致整局文件互相覆盖。
+        self.lock = threading.Lock()
 
     @staticmethod
     def bucket_key(cache_key, round_index):
@@ -103,6 +108,7 @@ class RoundCache:
         return '%s|%d|%d|%d' % (cache_key, round_index, step, viewer)
 
     def _bucket(self, cache_key, round_index):
+        """（调用方需持锁）取该局的整局字典，未命中时从磁盘加载。"""
         key = self.bucket_key(cache_key, round_index)
         bucket = self.mem.get(key)
         if bucket is None:
@@ -119,18 +125,24 @@ class RoundCache:
             self.mem.popitem(last=False)
 
     def get(self, cache_key, round_index, step, viewer):
-        _key, bucket = self._bucket(cache_key, round_index)
-        hit = bucket.get(self.entry_key(step, viewer))
-        if hit is not None:
-            return hit
-        if self.legacy is not None:
+        with self.lock:
+            _key, bucket = self._bucket(cache_key, round_index)
+            hit = bucket.get(self.entry_key(step, viewer))
+            if hit is not None:
+                return hit
+            if self.legacy is None:
+                return None
             old = self.legacy.get(self.legacy_key(cache_key, round_index, step, viewer))
             if old is not None:
-                self.put(cache_key, round_index, step, viewer, old)   # 迁移到新布局
+                self._write(cache_key, round_index, step, viewer, old)   # 迁移到新布局
             return old
-        return None
 
     def put(self, cache_key, round_index, step, viewer, value):
+        with self.lock:
+            self._write(cache_key, round_index, step, viewer, value)
+
+    def _write(self, cache_key, round_index, step, viewer, value):
+        """（调用方需持锁）写入 bucket 并落盘整局。"""
         key, bucket = self._bucket(cache_key, round_index)
         bucket[self.entry_key(step, viewer)] = value
         self.disk.put(key, bucket)

@@ -247,6 +247,18 @@ sudo nginx -t && sudo systemctl reload nginx
 - 牌谱磁盘缓存让同一 game_id 的 prepare 跳过平台拉取（含重启后）；上传路径按内容 sha1 去重
 - 清空缓存：`rm -rf backend/cache/`
 
+## 并发
+
+同步路由（`def`）由 FastAPI 放进线程池执行，所以**多个用户、或同一用户多开标签页，会真并发**。当前设计：
+
+- **多人同时分析同一局**：各自是独立请求，而缓存键不含 `analysis_id` → 共享同一份磁盘缓存。并发读安全；并发写同一局文件由 `RoundCache` 的锁串行化，**不会互相覆盖丢条目**（实测 8 并发请求同一局 → 单个文件 6 条全部落盘）
+- **结果确定性**：推理路径没有共享可变状态（模型权重只读、每次都新建 `FeatureAgent` 重放）→ 同一 `(round, step, viewer)` 无论谁在何时请求，结果都一致（实测重复请求的响应指纹相同）
+- **会重复推理的情况**：两个请求同时命中同一个尚未缓存的节点时，各算一次（无 single-flight）。模型推理是纯 CPU、单核本来就是串行瓶颈，最坏只是浪费一点算力，不影响正确性
+- **已加锁的位置**：`LRU`（step 内存缓存）、`RoundCache`（按局磁盘缓存）、`_prep_cache`（prepare 结果）、模型首次加载。锁只包住字典/文件操作，推理过程不持锁
+- **仍然只支持单进程**：多 worker（`--workers N`）下各进程内存缓存独立，写同一局文件会互相覆盖（丢条目 → 重算，不会返回错结果，但命中率下降），且模型内存翻倍。见「性能与容量」
+
+> 修复记录：`LRU.get` 的 `move_to_end` 与 `put` 的 `popitem` 交错会抛 `KeyError`（8 线程 6 万次迭代可复现）→ 请求 500；`RoundCache` 同样。已加锁修复，回归测试见 `tests/test_concurrency.py`。
+
 ## 性能基准
 
 ```bash
@@ -264,7 +276,7 @@ PYTHONPATH=backend .venv/bin/python scripts/bench_step.py
 PYTHONPATH=backend .venv/bin/pytest tests/ -v
 ```
 
-57 个测试全过，含 `tests/test_e2e.py`（权重存在时跑真实模型推理，校验 round 2 viewer 1 首打 `B1` 与 top-k 概率合法性）与 `test_converter_replay.py` 的 claim 用例（碰/吃/杠/过 的提取与实际选择回填）。
+61 个测试全过，含 `tests/test_e2e.py`（权重存在时跑真实模型推理，校验 round 2 viewer 1 首打 `B1` 与 top-k 概率合法性）、`test_converter_replay.py` 的 claim 用例（碰/吃/杠/过 的提取与实际选择回填）与 `test_concurrency.py` 的并发用例。
 
 ## 脚本
 

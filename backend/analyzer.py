@@ -1,22 +1,33 @@
 import math, time
+import threading
 from collections import OrderedDict
 import numpy as np
 from converter import parse_record, replay_round, RoundRecord
 
 class LRU:
+    """线程安全 LRU。
+
+    FastAPI 的同步路由跑在线程池里，多个请求会真并发；`get` 里的
+    `move_to_end` 与 `put` 里的 `popitem` 交错时，前者会对已被淘汰的键
+    抛 KeyError（实测 8 线程 6 万次迭代可复现）→ 请求 500。锁只包住字典
+    操作（微秒级），推理过程不持锁。
+    """
     def __init__(self, cap):
         self.cap = cap
         self.d = OrderedDict()
+        self.lock = threading.Lock()
     def get(self, k):
-        if k not in self.d:
-            return None
-        self.d.move_to_end(k)
-        return self.d[k]
+        with self.lock:
+            if k not in self.d:
+                return None
+            self.d.move_to_end(k)
+            return self.d[k]
     def put(self, k, v):
-        self.d[k] = v
-        self.d.move_to_end(k)
-        while len(self.d) > self.cap:
-            self.d.popitem(last=False)
+        with self.lock:
+            self.d[k] = v
+            self.d.move_to_end(k)
+            while len(self.d) > self.cap:
+                self.d.popitem(last=False)
 
 def _dump_node(n):
     """节点 → JSON 可序列化 dict（obs 不入 meta，需要时由 Analyzer._obs_for 重放取）。
