@@ -31,13 +31,14 @@ _CACHE_DIR = os.path.join(os.path.dirname(__file__), 'cache')
 _STEP_DISK = DiskCache(_CACHE_DIR)                                  # 单步分析结果
 _RECORD_DISK = DiskCache(os.path.join(_CACHE_DIR, 'record'), file_cap=200)  # 牌谱原始 JSON
 
-# 转换逻辑指纹：tiles.py / converter.py 的内容变化会让磁盘缓存自动失效。
+# 转换/结果指纹：tiles.py / converter.py（观测与节点提取）/ analyzer.py（结果结构）
+# 的内容变化会让磁盘缓存自动失效。
 # 曾经用手工版本号，结果"改了牌面映射却忘了递增"时读到按旧约定算出的缓存结果
 # （表现为测试里 actual_tile 是新的、ai_top 却还是旧的牌名）。
 def _transform_fingerprint():
     digest = hashlib.sha1()
     here = os.path.dirname(os.path.abspath(__file__))
-    for name in ('tiles.py', 'converter.py'):
+    for name in ('tiles.py', 'converter.py', 'analyzer.py'):
         try:
             with open(os.path.join(here, name), 'rb') as f:
                 digest.update(f.read())

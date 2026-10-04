@@ -31,7 +31,7 @@ def test_replay_other_viewer_no_node():
     # original 0 = player_index 3（北位）、original 3 = player_index 2（西位），本局未摸打即结束
     for viewer in (0, 3):
         ra = replay_round(g.rounds[1], viewer=viewer)
-        assert ra.nodes == []
+        assert [n for n in ra.nodes if n.kind == 'discard'] == []
 
 def test_round1_hu_terminates():
     data = _load()
@@ -73,11 +73,17 @@ def test_own_discard_claimed_by_next_does_not_crash():
         action_ticks=ticks)
     ra = replay_round(fake, viewer=0)
     assert ra.error is None
-    assert len(ra.nodes) == 2
-    n0, n1 = ra.nodes
+    disc = [n for n in ra.nodes if n.kind == 'discard']
+    assert len(disc) == 2
+    n0, n1 = disc
     assert n0.step == 0 and n0.actual_tile == 'W4'
     assert n1.step == 8 and n1.actual_tile == 'F2'
-    assert ra.nodes[0].ok
+    assert disc[0].ok
+    # 玩家1 打 21 时 viewer 手上有两张 21 → 额外产生一个「碰/过」的 claim 决策点
+    claims = [n for n in ra.nodes if n.kind == 'claim']
+    assert len(claims) == 1
+    assert claims[0].actual_action == 'pass'
+    assert {'pass', 'peng'} <= {o['action'] for o in claims[0].options}
 
 def test_bd_buflower_draw_to_claimant():
     # bh 的补花者(2) 非 start_player(0)：bh 不改变摸/打轮转；bd 补摸给补花者本人，
@@ -162,8 +168,9 @@ def test_chi_cr_discard1_boundary():
     ]
     ra = replay_round(_chi_fake(ticks), viewer=0)
     assert ra.error is None
-    assert len(ra.nodes) == 2
-    n = ra.nodes[1]
+    disc = [n for n in ra.nodes if n.kind == 'discard']
+    assert len(disc) == 2
+    n = disc[1]
     assert n.step == 4 and n.actual_tile == 'B1'
     assert n.melds == [['CHI', 'W2', 1]]     # offer 1 = cr（弃牌是左端）
 
@@ -303,3 +310,93 @@ def test_dealer_with_flower_buys_pending_via_bd():
     assert ra.error is None
     assert len(ra.nodes) == 1
     assert ra.nodes[0].step == 1 and ra.nodes[0].actual_tile == 'W1'
+
+
+# ---------- claim（吃/碰/杠/和/过）决策点 ----------
+
+def _claim_fake(ticks, hand0=None):
+    from converter import RoundRecord
+    return RoundRecord(
+        round_index=1, current_round=1, seats=[0, 1, 2, 3], dealer_index=0,
+        start_player_index=0,
+        hands=[hand0 or [21, 21, 11, 11, 11, 12, 12, 12, 13, 13, 13, 14, 17],
+               [31] * 13, [31] * 13, [41] * 13],
+        action_ticks=ticks)
+
+def test_claim_peng_actual_peng():
+    """别人打出本家有 2 张的牌 → claim 决策点；实际碰了。"""
+    ticks = [
+        ['d', 22], ['c', 22, 'T'],        # step0/1: viewer 摸打 22（discard 节点）
+        ['d', 21], ['c', 21, 'T'],        # step2/3: 玩家1 摸打 21 → viewer claim(step3)
+        ['p', 21, 0, 21, 21],             # step4: viewer 碰
+        ['c', 17, 'T'],                   # step5: 碰后打 17
+        ['liuju'],
+    ]
+    ra = replay_round(_claim_fake(ticks), viewer=0)
+    assert ra.error is None
+    claims = [n for n in ra.nodes if n.kind == 'claim']
+    assert len(claims) == 1
+    c = claims[0]
+    assert c.step == 3
+    assert c.claim_tile == 'B1'                             # 21 = 1筒 → B1
+    assert c.actual_action == 'peng'
+    assert {'pass', 'peng'} <= {o['action'] for o in c.options}
+    assert {o['tile'] for o in c.options if o['action'] == 'peng'} == {'B1'}
+
+def test_claim_chi_actual_chi():
+    """吃只能吃上家：viewer 门风 0 → 上家是 player_index 3。"""
+    hand0 = [11, 11, 11, 12, 12, 12, 13, 13, 13, 14, 17, 18, 21]
+    ticks = [
+        ['d', 22], ['c', 22, 'T'],
+        ['d', 13], ['c', 13, 'T'],        # 玩家3 摸打 3万（上家）→ viewer 可吃
+        ['cl', 13, 0, 11, 12],            # viewer cl 吃（弃牌是顺子右端 → 中间张 12）
+        ['c', 19, 'T'],
+        ['liuju'],
+    ]
+    ra = replay_round(_claim_fake(ticks, hand0), viewer=0)
+    assert ra.error is None
+    claims = [n for n in ra.nodes if n.kind == 'claim']
+    assert len(claims) == 1
+    c = claims[0]
+    assert c.claim_tile == 'W3'
+    assert c.actual_action == 'chi' and c.actual_tile == 'W2'
+
+def test_claim_gang_actual_gang():
+    """手上有 3 张 → 可明杠；实际杠了（随后杠上摸打）。"""
+    hand0 = [21, 21, 21, 11, 11, 11, 12, 12, 12, 13, 13, 13, 14]
+    ticks = [
+        ['d', 22], ['c', 22, 'T'],
+        ['d', 21], ['c', 21, 'T'],        # claim(step3)
+        ['g', 21, 0, 21, 21, 21],         # step4: viewer 明杠
+        ['gd', 16], ['c', 16, 'T'],       # 杠后摸打
+        ['liuju'],
+    ]
+    ra = replay_round(_claim_fake(ticks, hand0), viewer=0)
+    assert ra.error is None
+    claims = [n for n in ra.nodes if n.kind == 'claim']
+    assert len(claims) == 1 and claims[0].actual_action == 'gang'
+
+def test_claim_pass_actual_pass():
+    """有碰的机会但选择过：下一个 tick 是别家摸牌 → 判「过」。"""
+    ticks = [
+        ['d', 22], ['c', 22, 'T'],
+        ['d', 21], ['c', 21, 'T'],        # claim(step3)
+        ['d', 16], ['c', 16, 'T'],        # 玩家2 摸打 → claim 窗口关闭
+        ['liuju'],
+    ]
+    ra = replay_round(_claim_fake(ticks), viewer=0)
+    claims = [n for n in ra.nodes if n.kind == 'claim']
+    assert len(claims) == 1
+    assert claims[0].actual_action == 'pass' and claims[0].actual_tile is None
+
+def test_claim_only_pass_not_recorded():
+    """连吃碰杠和都没有（只能过）时不建节点，避免无意义的决策点。"""
+    hand0 = [11, 11, 11, 12, 12, 12, 13, 13, 13, 14, 17, 18, 19]
+    ticks = [
+        ['d', 22], ['c', 22, 'T'],
+        ['d', 21], ['c', 21, 'T'],        # viewer 手上没有 21 → 只能过
+        ['liuju'],
+    ]
+    ra = replay_round(_claim_fake(ticks, hand0), viewer=0)
+    assert ra.error is None
+    assert [n for n in ra.nodes if n.kind == 'claim'] == []

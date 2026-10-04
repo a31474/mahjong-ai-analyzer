@@ -536,6 +536,19 @@
 .ai-panel__list { display: grid; gap: 5px; margin: 0 0 8px; padding: 0; list-style: none; }
 .ai-panel__list li { display: flex; align-items: center; gap: 7px; }
 .ai-panel__list li.is-best .ai-panel__bar i { background: #df7d23; }
+/* claim（吃/碰/杠/和/过）面板：动作用文字标签而非牌面图，等宽避免抖动 */
+.ai-panel__claim-head { margin-bottom: 6px; color: #aeb4b6; font-size: 11px; }
+.ai-panel__claim-head strong { color: #f2f3f3; }
+.ai-panel__action {
+  flex: 0 0 auto;
+  min-width: 52px;
+  overflow: hidden;
+  color: #e8eaea;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ai-panel__list li.is-best .ai-panel__action { color: #f2b46a; font-weight: 700; }
 .ai-panel__tile {
   display: inline-flex;
   width: 22px;

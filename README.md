@@ -1,6 +1,6 @@
 # mahjong-ai-analyzer
 
-国标麻将 AI 牌谱分析服务：解析 salasasa.cn 平台的真实牌谱，用 IJCAI-2026 冠军模型（kdens3）对每一手打牌决策进行推理，展示「AI 认为应该打什么牌」与「玩家实际打了什么」的对比。
+国标麻将 AI 牌谱分析服务：解析 salasasa.cn 平台的真实牌谱，用 IJCAI-2026 冠军模型（kdens3）对每一手决策进行推理——既包括「该打什么牌」，也包括别人打出牌后「该吃 / 碰 / 杠 / 和 / 过」——并展示 AI 建议与玩家实际选择的对比。
 
 后端为纯 Python（FastAPI + numpy 推理），前端为 Vue 3 + PixiJS 回放渲染。
 
@@ -32,7 +32,7 @@
 ```
 
 - `backend/engine/`：IJCAI-2026 竞赛推理引擎（FeatureAgent 状态机 + numpy CNN），原样复制，未修改
-- `backend/converter.py`：open_mahjong 牌谱 tick 流 → FeatureAgent 观测的转换器
+- `backend/converter.py`：open_mahjong 牌谱 tick 流 → FeatureAgent 观测的转换器；每个视角提取两类决策点：打牌（`DiscardNode`）与鸣牌（`ClaimNode`：吃/碰/杠/和/过）
 - `backend/analyzer.py`：prepare（转换全部回合/视角）+ analyze_step（单节点推理，LRU 缓存）
 - `backend/model_loader.py`：三学生 ensemble 加载（`ENSEMBLE=1` 时单学生）
 - `web/`：Vue 3 + PixiJS 前端（回放引擎来自 open_mahjong_unity）
@@ -180,11 +180,13 @@ sudo nginx -t && sudo systemctl reload nginx
 
 ### `GET /api/analysis/{aid}/step?round=2&step=1&viewer=0`
 
-对单个决策点做 AI 推理，返回：
+对单个决策点做 AI 推理。决策点分两类，返回结构不同（`kind` 区分）：
+
+**打牌决策点**（`kind: "discard"`，自己摸牌/鸣牌后待打牌）：
 
 ```json
 {
-  "step": 1, "player": 0, "seat": 3, "actual_tile": "F4",
+  "kind": "discard", "step": 1, "player": 0, "seat": 3, "actual_tile": "F4",
   "ai_top": [{"tile": "F4", "prob": 0.866}, {"tile": "F1", "prob": 0.0668}, ...],
   "agree": true
 }
@@ -192,6 +194,28 @@ sudo nginx -t && sudo systemctl reload nginx
 
 - `ai_top`：模型概率最高的 3 个合法打牌（含概率）
 - `agree`：模型首选与玩家实际打牌是否一致
+
+**鸣牌决策点**（`kind: "claim"`，别人打牌后本家可吃/碰/杠/和/过）：
+
+```json
+{
+  "kind": "claim", "step": 40, "player": 0, "seat": 0, "claim_tile": "T3",
+  "actual_action": "pass", "actual_tile": null, "cuohe": false,
+  "ai_actions": [
+    {"action": "pass", "tile": null, "index": 0, "prob": 0.977},
+    {"action": "peng", "tile": "T3", "index": 108, "prob": 0.023}
+  ],
+  "agree": true
+}
+```
+
+- `claim_tile`：被鸣/被和的那张弃牌（CSM 编码，如 `T3` = 3索）
+- `ai_actions`：所有合法候选（含 `pass`）及概率，按概率降序；`action ∈ {pass, hu, chi, peng, gang}`
+  - `chi` 的 `tile` 是顺子**中间张**（吃什么由它决定），`peng`/`gang` 的 `tile` 是被鸣的牌，`pass`/`hu` 无 `tile`
+- `actual_action` / `actual_tile`：玩家实际选择（`cuohe: true` 表示选了和牌但为错和）
+- `agree`：AI 首选与实际选择是否一致（动作相同且牌相同）
+
+> 只有「存在吃/碰/杠/和机会」的时点才会生成鸣牌节点——若当时只能过，则不建节点（无分析价值）。
 
 ## 牌谱转换说明
 
@@ -202,6 +226,7 @@ sudo nginx -t && sudo systemctl reload nginx
 - **花牌剔除**：open_mahjong 花牌 id 51-58（春夏秋冬梅兰竹菊）不计入引擎手牌；起手 `bh`（补花）+ `bd`（补摸）成对处理，`bd` 的补摸者按 `bh` 的补花者确定
 - **花牌打出/不补**：玩家摸切打出花牌（`c` 事件带花）不进引擎仅轮转（无决策点、不崩溃）；玩家起手/摸花不补留在手里时花不进引擎，观测手牌 = 真实手牌的数牌部分（**内容逐张正确**），但观测张数比训练分布少 1 张（正常决策点 14 张、不补花玩家恒 13 张）——规则差异的固有偏差，模型建议基于正确牌型、校准度略降
 - **吃牌中间张**：`cl/cm/cr` 的 tick[1] 是被吃的弃牌，引擎 Chi 需要顺子中间张——`cl` 弃牌是顺子右端（-1）、`cm` 中间（0）、`cr` 左端（+1）；换算后越界（如 `cr` 吃 9 → 10）判为数据异常
+- **鸣牌决策点（claim）**：别人打出牌时引擎会构造 `Pass/Hu/Chi/Peng/Gang` 的合法集并返回观测，converter 以此建 `ClaimNode`（`step` = 该弃牌的 tick，与打牌节点不冲突）；**实际选择由后续 tick 揭晓**——鸣牌 tick（`cl/cm/cr/p/g` 且 actor 为本家）→ 吃/碰/杠、`hu_*` 且和牌者为本家 → 和（`错和` 会标记 `cuohe`）、别人摸牌/打牌/鸣牌 → 过。只有「存在非过候选」时才建节点
 - **player_index 域（原"original 域"）**：牌谱权威约定（`game_record_format.md:60`）——`p*_tiles` 下标与 tick 中玩家字段（`bh`/`bd` 补花补摸者、`cl/cm/cr/p/g` 鸣牌者、`hu` 和牌者）均为**当局 player_index**（门风位）。`seats[original] = player_index` 仅用于 original ↔ player_index 映射：分析视角以 original 标识，重放时经 `seats` 取该玩家的手牌与座位。摸/打轮转按 player_index。
 - **庄家起手 14 张**：`p0_tiles` 恒为庄家 14 张（13 + 首摸 1），剔花后 14 张合法，不做「>13 即异常」误判
 - **牌面字母约定**：`W`=万（11-19）、`B`=筒（21-29）、`T`=索（31-39），与 Botzone 官方协议、PyMahjongGB 一致（`backend/tiles.py`）。2026-09 前该映射曾反写（筒→T、索→B），已修正；`reset` tick 也改为以 `tick[1]` 为准（与回放引擎一致）。磁盘缓存键内含 `tiles.py`/`converter.py` 内容指纹，改转换逻辑后旧缓存自动失效。依据与实测见 [`docs/salasasa-botzone-conversion.md`](docs/salasasa-botzone-conversion.md) §3/§5
@@ -237,7 +262,7 @@ PYTHONPATH=backend .venv/bin/python scripts/bench_step.py
 PYTHONPATH=backend .venv/bin/pytest tests/ -v
 ```
 
-48 个测试全过，含 `tests/test_e2e.py`（权重存在时跑真实模型推理，校验 round 2 viewer 1 首打 `B1` 与 top-k 概率合法性）。
+53 个测试全过，含 `tests/test_e2e.py`（权重存在时跑真实模型推理，校验 round 2 viewer 1 首打 `B1` 与 top-k 概率合法性）与 `test_converter_replay.py` 的 claim 用例（碰/吃/杠/过 的提取与实际选择回填）。
 
 ## 脚本
 

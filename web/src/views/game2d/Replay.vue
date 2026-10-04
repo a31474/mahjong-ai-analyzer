@@ -33,6 +33,29 @@
           </header>
           <div v-if="aiLoading" class="ai-panel__state">AI 分析中…</div>
           <div v-else-if="aiError" class="ai-panel__state is-error">{{ aiError }}</div>
+          <template v-else-if="aiData && aiData.kind === 'claim' && aiData.ai_actions && aiData.ai_actions.length">
+            <div class="ai-panel__claim-head">
+              别人打出 <strong>{{ aiData.claim_tile ? aiTileLabel(aiData.claim_tile) : '—' }}</strong>
+            </div>
+            <ul class="ai-panel__list">
+              <li
+                v-for="(entry, index) in aiData.ai_actions"
+                :key="`${entry.action}-${entry.tile || ''}-${entry.index}`"
+                :class="{ 'is-best': index === 0 }"
+              >
+                <span class="ai-panel__action">{{ claimActionLabel(entry) }}</span>
+                <span class="ai-panel__bar">
+                  <i :style="{ width: `${Math.round(entry.prob * 100)}%` }" />
+                </span>
+                <strong>{{ (entry.prob * 100).toFixed(1) }}%</strong>
+              </li>
+            </ul>
+            <div class="ai-panel__actual" :class="aiData.agree ? 'is-agree' : 'is-disagree'">
+              <span>实际选择</span>
+              <span class="ai-panel__action">{{ actualClaimLabel }}</span>
+              <em>{{ aiData.agree ? '与 AI 一致' : '与 AI 分歧' }}</em>
+            </div>
+          </template>
           <template v-else-if="aiData && aiData.ai_top && aiData.ai_top.length">
             <ul class="ai-panel__list">
               <li
@@ -1723,19 +1746,25 @@ function buildAiNodeMaps(prepMeta: PrepareResult['meta'] | null) {
     const ticks = replay.value.rounds[frontIndex].action_ticks || []
     const perViewer = new Map<number, Map<number, number>>()
     for (let viewer = 0; viewer < 4; viewer += 1) {
-      const discardToStep = new Map<number, number>()
+      const tickToStep = new Map<number, number>()
       const viewerMeta = metaRound.viewers[String(viewer)]
       if (viewerMeta && !viewerMeta.error) {
         for (const node of viewerMeta.nodes) {
+          if (node.kind === 'claim') {
+            // claim 节点（别人打牌后本家可吃/碰/杠/和/过）：step 就是那个 c tick 本身
+            tickToStep.set(node.step, node.step)
+            continue
+          }
+          // discard 节点：step 是摸牌/鸣牌 tick，实际打出的那一手是其后的第一个 c
           for (let tick = node.step + 1; tick < ticks.length; tick += 1) {
             if (String(ticks[tick]?.[0] ?? '') === 'c') {
-              discardToStep.set(tick, node.step)
+              tickToStep.set(tick, node.step)
               break
             }
           }
         }
       }
-      perViewer.set(viewer, discardToStep)
+      perViewer.set(viewer, tickToStep)
     }
     maps.set(frontIndex, perViewer)
   }
@@ -1895,9 +1924,27 @@ function aiTileLabel(tile: string): string {
   const honors = ['中', '发', '白']
   if (prefix === 'F' && rank >= 1 && rank <= 4) return winds[rank - 1]
   if (prefix === 'J' && rank >= 1 && rank <= 3) return honors[rank - 1]
-  const names: Record<string, string> = { W: '万', T: '筒', B: '条' }
+  // 与 backend/tiles.py 的约定一致：T=索、B=筒（W=万）
+  const names: Record<string, string> = { W: '万', T: '索', B: '筒' }
   return names[prefix] ? `${rank}${names[prefix]}` : String(tile ?? '—')
 }
+
+const CLAIM_ACTION_NAMES: Record<string, string> = {
+  pass: '过', hu: '和', chi: '吃', peng: '碰', gang: '杠',
+}
+
+/** claim 候选/实际选择的展示文案：吃 3万 / 碰 5筒 / 过 / 和 */
+function claimActionLabel(entry: { action?: string, tile?: string | null }): string {
+  const name = CLAIM_ACTION_NAMES[String(entry?.action ?? '')] ?? String(entry?.action ?? '—')
+  return entry?.tile ? `${name} ${aiTileLabel(entry.tile)}` : name
+}
+
+const actualClaimLabel = computed(() => {
+  const data = aiData.value
+  if (!data || data.kind !== 'claim') return ''
+  const label = claimActionLabel({ action: data.actual_action || 'pass', tile: data.actual_tile })
+  return data.cuohe ? `${label}（错和）` : label
+})
 
 function loadAiPanelPosition(): { x: number, y: number } | null {
   try {

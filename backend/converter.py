@@ -54,6 +54,61 @@ def chi_middle_tile(tile_id, action):
                          % (action, tile_id, mid_rank))
     return to_csm(suit * 10 + mid_rank)
 
+def claim_options(agent):
+    """把 FeatureAgent 在「别人打牌」后构造的 valid 解码成候选动作列表。
+
+    动作空间（与 deploy/caiest_cnn/feature.py 的 OFFSET_ACT 一致）：
+        Pass=0, Hu=1, Play=2..35, Chi=36..98, Peng=99..132, Gang=133..166,
+        AnGang=167..200, BuGang=201..234
+    Chi 段每 3 个索引一组，对应一个顺子中间张（'WTB'[t//7] + (t%7+2)）；
+    Peng/Gang 段按 34 张牌逐一编码。AnGang/BuGang 不会出现在 claim 场景，忽略。
+    """
+    oa = agent.OFFSET_ACT
+    out = []
+    for idx in sorted(set(agent.valid or [])):
+        if idx == oa['Pass']:
+            out.append({'index': idx, 'action': 'pass', 'tile': None})
+        elif idx == oa['Hu']:
+            out.append({'index': idx, 'action': 'hu', 'tile': None})
+        elif idx < oa['Peng']:                      # Chi 段
+            t = (idx - oa['Chi']) // 3
+            out.append({'index': idx, 'action': 'chi',
+                        'tile': 'WTB'[t // 7] + str(t % 7 + 2)})
+        elif idx < oa['Gang']:
+            out.append({'index': idx, 'action': 'peng',
+                        'tile': agent.TILE_LIST[idx - oa['Peng']]})
+        elif idx < oa['AnGang']:
+            out.append({'index': idx, 'action': 'gang',
+                        'tile': agent.TILE_LIST[idx - oa['Gang']]})
+    return out
+
+# 出现这些事件说明 claim 窗口已关闭（本家没有鸣牌/和牌 → 判为「过」）
+_CLAIM_CLOSERS = frozenset(['d', 'gd', 'bd', 'c', 'liuju', 'end', 'ag', 'jg'])
+
+def _claim_resolution(a, tick, seat_wind, seats, current):
+    """判断该 tick 是否揭晓了挂起的 claim。
+
+    返回 (action, tile, cuohe)：action ∈ {chi,peng,gang,hu,pass}；tile 由调用方补
+    （chi 需要 chi_middle_tile 换算）。返回 None 表示事件与该决策无关，继续等待。
+    """
+    def actor_of():
+        if len(tick) > 2 and isinstance(tick[2], int) and 0 <= tick[2] < len(seats):
+            return tick[2]
+        return current
+
+    if a in ('cl', 'cm', 'cr', 'p', 'g'):
+        act = {'cl': 'chi', 'cm': 'chi', 'cr': 'chi', 'p': 'peng', 'g': 'gang'}[a]
+        return (act, None, False) if actor_of() == seat_wind else ('pass', None, False)
+    if a.startswith('hu'):
+        winner = tick[1] if len(tick) > 1 and isinstance(tick[1], int) else None
+        if winner == seat_wind:
+            cuohe = len(tick) > 3 and isinstance(tick[3], list) and '错和' in tick[3]
+            return ('hu', None, cuohe)
+        return ('pass', None, False)
+    if a in _CLAIM_CLOSERS:
+        return ('pass', None, False)
+    return None
+
 def parse_record(record, game_id, players, rule):
     game_round = record.get('game_round') or {}
     rounds = []
@@ -85,6 +140,26 @@ class DiscardNode:
     draw: str
     obs: dict
     ok: bool = True
+    kind: str = 'discard'
+
+@dataclass
+class ClaimNode:
+    """吃/碰/杠/和/过 的决策点：别人打出牌后、本家可鸣牌（或过）时的观测。
+
+    step = 别人打牌那一 tick 的索引（与 DiscardNode 的 step 不冲突：同一 tick
+    对同一 viewer 只会是二者之一）。实际选择由后续 tick 揭晓，见 _claim_resolution。
+    """
+    step: int
+    player: int                 # viewer（original）
+    seat: int                   # viewer 的门风（player_index）
+    claim_tile: str             # 被鸣/被和的弃牌（CSM，如 'T5'）
+    options: list               # [{'index','action','tile'}]，含 pass
+    obs: dict
+    actual_action: str = None   # 'pass'/'hu'/'chi'/'peng'/'gang'
+    actual_tile: str = None     # chi 为顺子中间张；peng/gang 为牌；pass/hu 为 None
+    cuohe: bool = False         # 实际选择了和牌但为错和
+    ok: bool = True
+    kind: str = 'claim'
 
 @dataclass
 class RoundAnalysis:
@@ -125,6 +200,7 @@ def replay_round(round_rec, viewer):
     last_discard_tile = None
     last_fed = None              # 最近一次成功喂入的 (player, tile)
     pending = None               # 待定决策点: (obs, step, draw_tile) —— 自己摸牌/鸣牌后尚未打牌
+    pending_claim = None         # 待揭晓的 claim 决策点（吃/碰/杠/和/过），由后续 tick 回填实际选择
     flower_claimants = []        # 补花者队列（bh 顺序 append，bd 消费）——多花/交错补花安全
 
     # 庄家起手 14 张（13 + 跳牌 1，开牌所得无 d 事件）：首打是打牌决策点。
@@ -141,17 +217,34 @@ def replay_round(round_rec, viewer):
         return a in ('d', 'gd', 'bd')
 
     def feed_play(player, tile):
-        """喂 'Player N Play XX'。自己打牌而 tile 已不在手牌时（补喂时该牌早在
-        c 事件移除、或状态漂移/非法流），跳过喂食避免 FeatureAgent 对 p==0
-        无条件 hand.remove 崩溃；返回是否实际喂入。"""
+        """喂 'Player N Play XX'，返回 (是否喂入, obs)。
+
+        自己打牌而 tile 已不在手牌时（补喂时该牌早在 c 事件移除、或状态漂移/非法流），
+        跳过喂食避免 FeatureAgent 对 p==0 无条件 hand.remove 崩溃。
+        obs 只在「别人打牌」时非空——那正是本家可吃/碰/杠/和/过的观测。
+        """
         if mine(player) and tile not in agent.hand:
-            return False
-        agent.request2obs('Player %d Play %s' % (player, tile))
-        return True
+            return False, None
+        return True, agent.request2obs('Player %d Play %s' % (player, tile))
 
     try:
         for step, tick in enumerate(round_rec.action_ticks):
             a = tick[0]
+            if pending_claim is not None:
+                # 先看这一 tick 有没有揭晓挂起的 claim（吃/碰/杠/和/过）
+                res = _claim_resolution(a, tick, seat_wind, seats, current)
+                if res is not None:
+                    act, mid, cuohe = res
+                    if act == 'chi':
+                        try:
+                            mid = chi_middle_tile(tick[1], a)
+                        except ValueError:
+                            mid = None
+                    pending_claim.actual_action = act
+                    pending_claim.actual_tile = mid
+                    pending_claim.cuohe = cuohe
+                    nodes.append(pending_claim)
+                    pending_claim = None
             if a == 'reset':
                 # 重置事件（开局补花结束后/跳转）：显式声明当前行动者（player_index 域）。
                 # 前端回放引擎同样以 tick[1] 为准；实测 48/48 局与 start_player_index 相等，
@@ -204,7 +297,7 @@ def replay_round(round_rec, viewer):
                     current = (current + 1) % 4
                     continue
                 tile = to_csm(tid)
-                fed = feed_play(current, tile)
+                fed, play_obs = feed_play(current, tile)
                 if fed:
                     last_fed = (current, tile)
                 if mine(current):
@@ -223,6 +316,14 @@ def replay_round(round_rec, viewer):
                                 draw=draw_tile,
                                 obs=obs))
                     pending = None
+                elif play_obs is not None:
+                    # 别人打出的牌 → 本家可能有吃/碰/杠/和/过 的决策点。引擎此时已把
+                    # 该弃牌计入牌河并构造好 valid（含 Pass），play_obs 就是该决策点观测。
+                    # 只有 Pass 的情况没有分析价值，跳过。
+                    opts = claim_options(agent)
+                    if any(o['action'] != 'pass' for o in opts):
+                        pending_claim = ClaimNode(step=step, player=viewer, seat=seat_wind,
+                                                  claim_tile=tile, options=opts, obs=play_obs)
                 last_discarder, last_discard_tile = current, tile
                 current = (current + 1) % 4
                 continue
@@ -231,7 +332,8 @@ def replay_round(round_rec, viewer):
                 if last_discarder is not None and last_fed != (last_discarder, last_discard_tile):
                     # 状态漂移防御：补喂失败（弃牌不在手牌等）说明事件流已不一致，
                     # 继续喂会拿过期 curTile 错乱，显式走 error 路径
-                    if not feed_play(last_discarder, last_discard_tile):
+                    fed_ok, _obs = feed_play(last_discarder, last_discard_tile)
+                    if not fed_ok:
                         raise ValueError('鸣牌前弃牌喂入失败（状态漂移）: %s' % (last_discard_tile,))
                 tile = chi_middle_tile(tick[1], a)
                 obs = agent.request2obs('Player %d Chi %s' % (actor, tile))
@@ -245,7 +347,8 @@ def replay_round(round_rec, viewer):
                 if last_discarder is not None and last_fed != (last_discarder, last_discard_tile):
                     # 状态漂移防御：补喂失败（弃牌不在手牌等）说明事件流已不一致，
                     # 继续喂会拿过期 curTile 错乱，显式走 error 路径
-                    if not feed_play(last_discarder, last_discard_tile):
+                    fed_ok, _obs = feed_play(last_discarder, last_discard_tile)
+                    if not fed_ok:
                         raise ValueError('鸣牌前弃牌喂入失败（状态漂移）: %s' % (last_discard_tile,))
                 obs = agent.request2obs('Player %d Peng' % actor)
                 if obs is not None:
@@ -258,7 +361,8 @@ def replay_round(round_rec, viewer):
                 if last_discarder is not None and last_fed != (last_discarder, last_discard_tile):
                     # 状态漂移防御：补喂失败（弃牌不在手牌等）说明事件流已不一致，
                     # 继续喂会拿过期 curTile 错乱，显式走 error 路径
-                    if not feed_play(last_discarder, last_discard_tile):
+                    fed_ok, _obs = feed_play(last_discarder, last_discard_tile)
+                    if not fed_ok:
                         raise ValueError('鸣牌前弃牌喂入失败（状态漂移）: %s' % (last_discard_tile,))
                 agent.request2obs('Player %d Gang' % actor)
                 current = actor

@@ -3,14 +3,29 @@ export interface AiTopEntry {
   prob: number
 }
 
+/** claim 决策点的一个候选动作：pass/hu/chi/peng/gang；chi 的 tile 是顺子中间张。 */
+export interface AiClaimAction {
+  action: 'pass' | 'hu' | 'chi' | 'peng' | 'gang'
+  tile: string | null
+  index: number
+  prob: number
+}
+
 export interface AiStepResult {
+  kind?: 'discard' | 'claim'
   step: number
   player: number
   seat: number
-  actual_tile: string
-  ai_top: AiTopEntry[]
   agree: boolean
   error?: string
+  // kind='discard'（自己摸/鸣牌后待打牌）
+  actual_tile?: string
+  ai_top?: AiTopEntry[]
+  // kind='claim'（别人打牌后本家可吃/碰/杠/和/过）
+  claim_tile?: string
+  actual_action?: 'pass' | 'hu' | 'chi' | 'peng' | 'gang'
+  cuohe?: boolean
+  ai_actions?: AiClaimAction[]
 }
 
 export interface PrepareResult {
@@ -22,7 +37,7 @@ export interface PrepareResult {
       round_index: number
       viewers: Record<string, {
         error?: string | null
-        nodes: Array<{ step: number }>
+        nodes: Array<{ step: number; kind?: 'discard' | 'claim'; actual_action?: string }>
       }>
     }>
   }
