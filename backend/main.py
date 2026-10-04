@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from fastapi.staticfiles import StaticFiles
 
 from analyzer import prepare, Analyzer
-from cache_store import DiskCache
+from cache_store import DiskCache, RoundCache
 from salasa import fetch_record
 from model_loader import load_model, ModelMissingError
 
@@ -28,7 +28,9 @@ _prep_cache = OrderedDict()
 _PREP_CAP = 20
 # 磁盘持久化（backend/cache/，gitignore）：重启后同一牌谱免重复推理/拉取
 _CACHE_DIR = os.path.join(os.path.dirname(__file__), 'cache')
-_STEP_DISK = DiskCache(_CACHE_DIR)                                  # 单步分析结果
+# 分析结果按「局」聚合：一个文件存该局所有 (step, viewer) 的结果（原为每步一个文件）
+_ROUND_DISK = DiskCache(os.path.join(_CACHE_DIR, 'round'), file_cap=2000)
+_STEP_CACHE = RoundCache(_ROUND_DISK, legacy=DiskCache(_CACHE_DIR))   # legacy：旧单步缓存，读到即迁移
 _RECORD_DISK = DiskCache(os.path.join(_CACHE_DIR, 'record'), file_cap=200)  # 牌谱原始 JSON
 
 # 转换/结果指纹：tiles.py / converter.py（观测与节点提取）/ analyzer.py（结果结构）
@@ -134,7 +136,7 @@ def api_step(aid: str, round: int, step: int, viewer: int = 0):
         raise HTTPException(status_code=404, detail='analysis_id 不存在或已过期')
     global _ANALYZER
     if _ANALYZER is None:
-        _ANALYZER = Analyzer(_get_model(), disk=_STEP_DISK)   # 全局复用：LRU + 磁盘缓存跨请求生效
+        _ANALYZER = Analyzer(_get_model(), disk=_STEP_CACHE)   # 全局复用：LRU + 磁盘缓存跨请求生效
     return _ANALYZER.analyze_step(prep, round, step, viewer)
 
 _web_dir = os.path.join(os.path.dirname(__file__), '..', 'web', 'dist')

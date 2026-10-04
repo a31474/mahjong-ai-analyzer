@@ -55,10 +55,7 @@ class Analyzer:
     def __init__(self, model, cache_cap=2000, disk=None):
         self.model = model
         self.cache = LRU(cache_cap)
-        self.disk = disk        # DiskCache 实例（可选）：单步结果持久化
-
-    def _disk_key(self, prep, round_index, step, viewer):
-        return '%s|%d|%d|%d' % (prep['cache_key'], round_index, step, viewer)
+        self.disk = disk        # RoundCache 实例（可选）：同一局的所有单步结果聚合持久化
 
     def _node_meta(self, prep, round_index, step, viewer):
         for r in prep['rounds']:
@@ -91,7 +88,7 @@ class Analyzer:
         if hit is not None:
             return hit
         if self.disk is not None:
-            hit = self.disk.get(self._disk_key(prep, round_index, step, viewer))
+            hit = self.disk.get(prep['cache_key'], round_index, step, viewer)
             if hit is not None:
                 self.cache.put(key, hit)
                 return hit
@@ -107,7 +104,7 @@ class Analyzer:
             else self._discard_result(node, probs, mask)
         self.cache.put(key, out)
         if self.disk is not None:
-            self.disk.put(self._disk_key(prep, round_index, step, viewer), out)
+            self.disk.put(prep['cache_key'], round_index, step, viewer, out)
         return out
 
     @staticmethod

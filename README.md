@@ -33,7 +33,7 @@
 
 - `backend/engine/`：IJCAI-2026 竞赛推理引擎（FeatureAgent 状态机 + numpy CNN），原样复制，未修改
 - `backend/converter.py`：open_mahjong 牌谱 tick 流 → FeatureAgent 观测的转换器；每个视角提取两类决策点：打牌（`DiscardNode`）与鸣牌（`ClaimNode`：吃/碰/杠/和/过）
-- `backend/analyzer.py`：prepare（转换全部回合/视角）+ analyze_step（单节点推理，LRU 缓存）
+- `backend/analyzer.py`：prepare（转换全部回合/视角）+ analyze_step（单节点推理；内存 LRU + 按局聚合的磁盘缓存）
 - `backend/model_loader.py`：三学生 ensemble 加载（`ENSEMBLE=1` 时单学生）
 - `web/`：Vue 3 + PixiJS 前端（回放引擎来自 open_mahjong_unity）
   - 2D 回放界面来自上游 `open_mahjong_unity`：`web/src/game2d/`、`web/src/views/game2d/`、`web/src/constants/`、`web/src/i18n/`、`web/public/game2d-assets/`。**当前同步点 `1a76ab42`（dev ver 0.4.78.1，2026-10-04）**；自 0.4.77 起上游改动以其他麻将规则/复式/站点功能为主，本项目按「只摘通用修复」增量同步，判定原则与历史见 [`docs/upstream-sync.md`](docs/upstream-sync.md)
@@ -237,11 +237,13 @@ sudo nginx -t && sudo systemctl reload nginx
 |---|---|---|---|
 | prep 内存缓存 | `main._prep_cache`（LRU cap 20） | `analysis_id → prepare 结果`（节点元数据 + round 重建数据） | 进程内，重启失效 |
 | step 内存缓存 | `Analyzer.cache`（LRU cap 2000） | `(cache_key, round, step, viewer) → 单步分析结果` | 进程内，重启失效 |
-| **step 磁盘缓存** | `backend/cache/`（gitignore，文件数上限 5000） | 同上（JSON，原子写），键含转换指纹 | **重启保留**（改转换逻辑即失效） |
+| **step 磁盘缓存** | `backend/cache/round/`（gitignore，文件数上限 2000） | **一局一个文件**：`{"<step>|<viewer>": 单步结果, ...}`，键含转换指纹 | **重启保留**（改转换逻辑即失效） |
 | **牌谱磁盘缓存** | `backend/cache/record/`（gitignore，文件数上限 200） | 原始牌谱 JSON + players/rule（按 game_id，上传按内容 sha1） | **重启保留**（与转换逻辑无关） |
 
-- step 磁盘缓存键为 `enc<内容指纹>|game_id`（或 `|sha1:<上传内容>`），不依赖 `analysis_id`——重启或新会话后同一牌谱已分析过的步直接命中磁盘（0 推理）
-- 指纹取自 `backend/tiles.py` + `backend/converter.py` 的内容，**改了映射/事件处理就自动失效**，无需手工递增版本号或清缓存（历史教训：只按牌谱+位置做键时，改完映射仍读到按旧约定算出的结果）
+- step 磁盘缓存**按局聚合**：同一牌谱同一局的所有 (step, viewer) 结果共用一个 JSON 文件（`RoundCache`，内存里保留最近 32 局的整局字典，避免「先 get 再 put」每步两次读写）。原来是一步一个文件，长期使用会堆到上千个小文件；现在典型牌谱 16 局 → 16 个文件
+- 文件键为 `enc<内容指纹>|game_id|r<round>`（上传路径为 `|sha1:<上传内容>`），不依赖 `analysis_id`——重启或新会话后同一牌谱已分析过的步直接命中磁盘（0 推理）
+- 指纹取自 `backend/tiles.py` + `backend/converter.py` + `backend/analyzer.py` 的内容，**改了映射/事件处理/结果结构就自动失效**，无需手工递增版本号或清缓存（历史教训：只按牌谱+位置做键时，改完映射仍读到按旧约定算出的结果）
+- 兼容旧布局：`backend/cache/*.json` 里的「单步一文件」旧缓存仍会被读取，命中后写入新布局（`RoundCache(legacy=...)`），即读到即迁移；确认新缓存已建立后旧文件可删
 - 牌谱磁盘缓存让同一 game_id 的 prepare 跳过平台拉取（含重启后）；上传路径按内容 sha1 去重
 - 清空缓存：`rm -rf backend/cache/`
 
@@ -262,7 +264,7 @@ PYTHONPATH=backend .venv/bin/python scripts/bench_step.py
 PYTHONPATH=backend .venv/bin/pytest tests/ -v
 ```
 
-53 个测试全过，含 `tests/test_e2e.py`（权重存在时跑真实模型推理，校验 round 2 viewer 1 首打 `B1` 与 top-k 概率合法性）与 `test_converter_replay.py` 的 claim 用例（碰/吃/杠/过 的提取与实际选择回填）。
+57 个测试全过，含 `tests/test_e2e.py`（权重存在时跑真实模型推理，校验 round 2 viewer 1 首打 `B1` 与 top-k 概率合法性）与 `test_converter_replay.py` 的 claim 用例（碰/吃/杠/过 的提取与实际选择回填）。
 
 ## 脚本
 
