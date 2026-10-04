@@ -497,8 +497,9 @@
   top: 12px;
   right: 12px;
   z-index: 45;
-  width: 218px;
-  padding: 10px 11px;
+  /* 随视口放大：小屏维持 218px，1920 宽下约 298px，上限 320px */
+  width: clamp(218px, 15.5vw, 320px);
+  padding: clamp(10px, 0.6vw, 14px) clamp(11px, 0.68vw, 16px);
   border: 1px solid rgba(255, 255, 255, 0.24);
   border-radius: 8px;
   background: rgba(18, 20, 21, 0.92);
@@ -512,8 +513,8 @@
 .ai-panel__head {
   display: flex;
   align-items: baseline;
-  gap: 8px;
-  margin-bottom: 7px;
+  gap: clamp(8px, 0.5vw, 11px);
+  margin-bottom: clamp(7px, 0.45vw, 10px);
   cursor: grab;
   touch-action: none;
   user-select: none;
@@ -529,33 +530,33 @@
   background-image: radial-gradient(circle, rgba(255, 255, 255, 0.5) 1px, transparent 1.2px);
   background-size: 4px 4px;
 }
-.ai-panel__head strong { margin-right: auto; color: #f2f3f3; font-size: 13px; letter-spacing: 0.05em; }
-.ai-panel__head span { overflow: hidden; color: #9aa1a3; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-.ai-panel__state { padding: 4px 0 2px; color: #aeb4b6; font-size: 12px; }
+.ai-panel__head strong { margin-right: auto; color: #f2f3f3; font-size: clamp(13px, 0.8vw, 16px); letter-spacing: 0.05em; }
+.ai-panel__head span { overflow: hidden; color: #9aa1a3; font-size: clamp(10px, 0.62vw, 12px); text-overflow: ellipsis; white-space: nowrap; }
+.ai-panel__state { padding: 4px 0 2px; color: #aeb4b6; font-size: clamp(12px, 0.72vw, 14px); }
 .ai-panel__state.is-error { color: #f0a0a0; }
-.ai-panel__list { display: grid; gap: 5px; margin: 0 0 8px; padding: 0; list-style: none; }
-.ai-panel__list li { display: flex; align-items: center; gap: 7px; }
+.ai-panel__list { display: grid; gap: clamp(5px, 0.34vw, 8px); margin: 0 0 8px; padding: 0; list-style: none; }
+.ai-panel__list li { display: flex; align-items: center; gap: clamp(7px, 0.48vw, 11px); }
 .ai-panel__list li.is-best .ai-panel__bar i { background: #df7d23; }
 /* claim（吃/碰/杠/和/过）面板：动作文字只留一个字，牌用牌图；等宽避免抖动 */
-.ai-panel__claim-head { margin-bottom: 6px; color: #aeb4b6; font-size: 11px; }
+.ai-panel__claim-head { margin-bottom: 6px; color: #aeb4b6; font-size: clamp(11px, 0.68vw, 13px); }
 .ai-panel__claim-head strong { color: #f2f3f3; }
 .ai-panel__action {
-  flex: 0 0 24px;
-  width: 24px;
+  flex: 0 0 clamp(24px, 1.5vw, 32px);
+  width: clamp(24px, 1.5vw, 32px);
   overflow: hidden;
   color: #e8eaea;
-  font-size: 11px;
+  font-size: clamp(11px, 0.68vw, 14px);
   text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 /* 「实际」行的动作标签允许更宽（吃/碰/杠/和/过 都是单字，此处用于对齐牌图） */
-.ai-panel__action--actual { flex: 0 0 24px; text-align: left; }
+.ai-panel__action--actual { flex: 0 0 clamp(24px, 1.5vw, 32px); text-align: left; }
 .ai-panel__list li.is-best .ai-panel__action { color: #f2b46a; font-weight: 700; }
 /* claim 的牌图：比打牌面板小一号，便于一行放下三张（吃） */
 .ai-panel__tiles { display: inline-flex; flex: 0 0 auto; gap: 2px; }
 .ai-panel__tiles img {
-  width: 17px;
+  width: clamp(17px, 1.15vw, 24px);
   aspect-ratio: 3 / 4;
   border: 1px solid #31383c;
   border-radius: 2px;
@@ -565,8 +566,8 @@
 .ai-panel__actual em.is-warn { color: #e8b04b; }
 .ai-panel__tile {
   display: inline-flex;
-  width: 22px;
-  flex: 0 0 22px;
+  width: clamp(22px, 1.45vw, 30px);
+  flex: 0 0 clamp(22px, 1.45vw, 30px);
   aspect-ratio: 3 / 4;
   align-items: center;
   justify-content: center;
@@ -579,23 +580,23 @@
 .ai-panel__bar {
   flex: 1 1 auto;
   min-width: 0;
-  height: 9px;
+  height: clamp(9px, 0.47vw, 12px);
   overflow: hidden;
   border-radius: 5px;
   background: #2c3235;
 }
 .ai-panel__bar i { display: block; height: 100%; border-radius: 5px; background: #5c91d8; }
-.ai-panel__list strong { min-width: 38px; color: #e8eaea; font-size: 11px; font-variant-numeric: tabular-nums; text-align: right; }
+.ai-panel__list strong { min-width: clamp(38px, 2.6vw, 52px); color: #e8eaea; font-size: clamp(11px, 0.7vw, 14px); font-variant-numeric: tabular-nums; text-align: right; }
 .ai-panel__actual {
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding-top: 7px;
+  gap: clamp(7px, 0.48vw, 11px);
+  padding-top: clamp(7px, 0.48vw, 10px);
   border-top: 1px solid rgba(255, 255, 255, 0.14);
   color: #d6dada;
-  font-size: 11px;
+  font-size: clamp(11px, 0.68vw, 14px);
 }
-.ai-panel__actual em { margin-left: auto; font-style: normal; font-size: 10px; }
+.ai-panel__actual em { margin-left: auto; font-style: normal; font-size: clamp(10px, 0.62vw, 13px); }
 .ai-panel__actual.is-agree em { color: #58c987; }
 .ai-panel__actual.is-disagree em { color: #ee7474; }
 
