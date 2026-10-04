@@ -36,7 +36,7 @@ _MODEL_LOCK = threading.Lock()
 _CACHE_DIR = os.path.join(os.path.dirname(__file__), 'cache')
 # 分析结果按「局」聚合：一个文件存该局所有 (step, viewer) 的结果（原为每步一个文件）
 _ROUND_DISK = DiskCache(os.path.join(_CACHE_DIR, 'round'), file_cap=2000)
-_STEP_CACHE = RoundCache(_ROUND_DISK, legacy=DiskCache(_CACHE_DIR))   # legacy：旧单步缓存，读到即迁移
+_STEP_CACHE = RoundCache(_ROUND_DISK)          # 旧的「单步一文件」缓存（cache/*.json）已废弃，可删
 _RECORD_DISK = DiskCache(os.path.join(_CACHE_DIR, 'record'), file_cap=200)  # 牌谱原始 JSON
 
 # 转换/结果指纹：tiles.py / converter.py（观测与节点提取）/ analyzer.py（结果结构）

@@ -74,18 +74,15 @@ class RoundCache:
     文件内容形如 {"<step>|<viewer>": <单步结果>, ...}。文件数从「每步一个」
     （多牌谱下会堆到上千个）降为「每局一个」（典型牌谱 16 局 → 16 个文件）。
 
-    - 内存里保留最近 mem_cap 局的整局字典：analyze_step 是「先 get 再 put」，
-      没有它每一步都要读+写整个文件两次。
-    - legacy：可选的旧「单步一文件」缓存；旧命中会顺手写入新布局（一次性迁移），
-      此后新文件取代旧文件。
+    内存里保留最近 mem_cap 局的整局字典：analyze_step 是「先 get 再 put」，
+    没有它每一步都要读+写整个文件两次。
 
     注意：写回是「整个局文件」，因此**只适合单进程**（多 worker 会互相覆盖同一局
     的结果）——本项目按 README 约定以单 worker 运行。
     """
 
-    def __init__(self, disk, mem_cap=32, legacy=None):
+    def __init__(self, disk, mem_cap=32):
         self.disk = disk
-        self.legacy = legacy
         self.mem_cap = mem_cap
         self.mem = OrderedDict()
         # 并发保护：FastAPI 同步路由在线程池里真并发。get/put 全程持锁（含磁盘
@@ -101,11 +98,6 @@ class RoundCache:
     @staticmethod
     def entry_key(step, viewer):
         return '%d|%d' % (step, viewer)
-
-    @staticmethod
-    def legacy_key(cache_key, round_index, step, viewer):
-        """旧布局的键（单步一文件）。"""
-        return '%s|%d|%d|%d' % (cache_key, round_index, step, viewer)
 
     def _bucket(self, cache_key, round_index):
         """（调用方需持锁）取该局的整局字典，未命中时从磁盘加载。"""
@@ -127,15 +119,7 @@ class RoundCache:
     def get(self, cache_key, round_index, step, viewer):
         with self.lock:
             _key, bucket = self._bucket(cache_key, round_index)
-            hit = bucket.get(self.entry_key(step, viewer))
-            if hit is not None:
-                return hit
-            if self.legacy is None:
-                return None
-            old = self.legacy.get(self.legacy_key(cache_key, round_index, step, viewer))
-            if old is not None:
-                self._write(cache_key, round_index, step, viewer, old)   # 迁移到新布局
-            return old
+            return bucket.get(self.entry_key(step, viewer))
 
     def put(self, cache_key, round_index, step, viewer, value):
         with self.lock:

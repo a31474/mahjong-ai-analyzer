@@ -101,18 +101,6 @@ def test_round_cache_survives_new_instance(tmp_path):
     assert rc2.get('ck', 1, 99, 2) is None
 
 
-def test_round_cache_migrates_legacy_single_step(tmp_path):
-    """旧「单步一文件」缓存命中后写入新布局（读到即迁移）。"""
-    legacy = DiskCache(str(tmp_path))
-    legacy.put(RoundCache.legacy_key('ck', 4, 9, 0), {'legacy': True})
-    new_dir = str(tmp_path / 'round')
-    rc = RoundCache(DiskCache(new_dir), legacy=legacy)
-    assert rc.get('ck', 4, 9, 0) == {'legacy': True}
-    assert len(os.listdir(new_dir)) == 1                     # 已迁移到新布局
-    fresh = RoundCache(DiskCache(new_dir))                   # 不依赖 legacy 也能命中
-    assert fresh.get('ck', 4, 9, 0) == {'legacy': True}
-
-
 def test_round_cache_mem_lru_bounded(tmp_path):
     """内存只保留最近若干局，超限时淘汰最旧的（磁盘仍在）。"""
     rc = RoundCache(DiskCache(str(tmp_path)), mem_cap=2)
