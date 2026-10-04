@@ -536,19 +536,33 @@
 .ai-panel__list { display: grid; gap: 5px; margin: 0 0 8px; padding: 0; list-style: none; }
 .ai-panel__list li { display: flex; align-items: center; gap: 7px; }
 .ai-panel__list li.is-best .ai-panel__bar i { background: #df7d23; }
-/* claim（吃/碰/杠/和/过）面板：动作用文字标签而非牌面图，等宽避免抖动 */
+/* claim（吃/碰/杠/和/过）面板：动作文字只留一个字，牌用牌图；等宽避免抖动 */
 .ai-panel__claim-head { margin-bottom: 6px; color: #aeb4b6; font-size: 11px; }
 .ai-panel__claim-head strong { color: #f2f3f3; }
 .ai-panel__action {
-  flex: 0 0 62px;
-  width: 62px;
+  flex: 0 0 24px;
+  width: 24px;
   overflow: hidden;
   color: #e8eaea;
   font-size: 11px;
+  text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* 「实际」行的动作标签允许更宽（吃/碰/杠/和/过 都是单字，此处用于对齐牌图） */
+.ai-panel__action--actual { flex: 0 0 24px; text-align: left; }
 .ai-panel__list li.is-best .ai-panel__action { color: #f2b46a; font-weight: 700; }
+/* claim 的牌图：比打牌面板小一号，便于一行放下三张（吃） */
+.ai-panel__tiles { display: inline-flex; flex: 0 0 auto; gap: 2px; }
+.ai-panel__tiles img {
+  width: 17px;
+  aspect-ratio: 3 / 4;
+  border: 1px solid #31383c;
+  border-radius: 2px;
+  background: #f7f7f0;
+  object-fit: contain;
+}
+.ai-panel__actual em.is-warn { color: #e8b04b; }
 .ai-panel__tile {
   display: inline-flex;
   width: 22px;
