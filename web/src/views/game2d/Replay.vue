@@ -43,15 +43,7 @@
                 :key="`${entry.action}-${entry.tile || ''}-${entry.index}`"
                 :class="{ 'is-best': index === 0 }"
               >
-                <span class="ai-panel__action" :title="claimActionTitle(entry)">{{ claimActionName(entry) }}</span>
-                <span v-if="claimActionTiles(entry).length" class="ai-panel__tiles">
-                  <img
-                    v-for="tile in claimActionTiles(entry)"
-                    :key="tile"
-                    :src="mmcrTileAsset(aiTileToMmcr(tile))"
-                    :alt="aiTileLabel(tile)"
-                  />
-                </span>
+                <span class="ai-panel__action" :title="claimActionTitle(entry)">{{ claimActionLabel(entry) }}</span>
                 <span class="ai-panel__bar">
                   <i :style="{ width: `${Math.round(entry.prob * 100)}%` }" />
                 </span>
@@ -61,15 +53,7 @@
             <div class="ai-panel__actual" :class="aiData.agree ? 'is-agree' : 'is-disagree'">
               <span>实际</span>
               <span class="ai-panel__action ai-panel__action--actual" :title="actualClaimTitle">
-                {{ actualClaimName }}
-              </span>
-              <span v-if="actualClaimTiles.length" class="ai-panel__tiles">
-                <img
-                  v-for="tile in actualClaimTiles"
-                  :key="tile"
-                  :src="mmcrTileAsset(aiTileToMmcr(tile))"
-                  :alt="aiTileLabel(tile)"
-                />
+                {{ actualClaimLabel }}
               </span>
               <em :class="{ 'is-warn': aiData.cuohe }">
                 {{ aiData.cuohe ? '错和' : (aiData.agree ? '与 AI 一致' : '与 AI 分歧') }}
@@ -2006,40 +1990,6 @@ const actualClaimTitle = computed(() => {
   if (!data || data.kind !== 'claim') return ''
   const title = claimActionTitle({ action: data.actual_action || 'pass', tile: data.actual_tile })
   return data.cuohe ? `${title}（错和）` : title
-})
-
-/** 动作单字名——候选行改用牌图，文字只留「吃/碰/杠/过/和」一个字 */
-function claimActionName(entry: { action?: string }): string {
-  const action = String(entry?.action ?? '')
-  return CLAIM_ACTION_NAMES[action] ?? (action || '—')
-}
-
-/** 动作涉及的牌：chi = 完整顺子三张、peng/gang = 一张；pass/hu 无牌（保持文字） */
-function claimActionTiles(entry: { action?: string, tile?: string | null, tiles?: string[] | null }): string[] {
-  const action = String(entry?.action ?? '')
-  if (action === 'chi') {
-    if (entry?.tiles?.length === 3) return entry.tiles
-    if (entry?.tile) {
-      const colour = String(entry.tile)[0]
-      const rank = Number(String(entry.tile).slice(1))
-      return [`${colour}${rank - 1}`, `${colour}${rank}`, `${colour}${rank + 1}`]
-    }
-    return []
-  }
-  if ((action === 'peng' || action === 'gang') && entry?.tile) return [entry.tile]
-  return []
-}
-
-const actualClaimName = computed(() => {
-  const data = aiData.value
-  if (!data || data.kind !== 'claim') return ''
-  return claimActionName({ action: data.actual_action || 'pass' })
-})
-
-const actualClaimTiles = computed(() => {
-  const data = aiData.value
-  if (!data || data.kind !== 'claim') return []
-  return claimActionTiles({ action: data.actual_action || 'pass', tile: data.actual_tile })
 })
 
 function loadAiPanelPosition(): { x: number, y: number } | null {
