@@ -3,10 +3,12 @@ export interface AiTopEntry {
   prob: number
 }
 
-/** claim 决策点的一个候选动作：pass/hu/chi/peng/gang；chi 的 tile 是顺子中间张。 */
+/** claim 决策点的一个候选动作：pass/hu/chi/peng/gang。
+ *  chi 的 tile 是引擎动作空间里的顺子中间张（如 B8），tiles 是完整顺子（['B7','B8','B9']）。 */
 export interface AiClaimAction {
   action: 'pass' | 'hu' | 'chi' | 'peng' | 'gang'
   tile: string | null
+  tiles?: string[] | null
   index: number
   prob: number
 }

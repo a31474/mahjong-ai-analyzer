@@ -344,11 +344,13 @@ def test_claim_peng_actual_peng():
     assert {o['tile'] for o in c.options if o['action'] == 'peng'} == {'B1'}
 
 def test_claim_chi_actual_chi():
-    """吃只能吃上家：viewer 门风 0 → 上家是 player_index 3。"""
+    """吃只能吃上家：轮转到 player_index 3 打牌时，viewer（门风 0）才有吃的候选。"""
     hand0 = [11, 11, 11, 12, 12, 12, 13, 13, 13, 14, 17, 18, 21]
     ticks = [
-        ['d', 22], ['c', 22, 'T'],
-        ['d', 13], ['c', 13, 'T'],        # 玩家3 摸打 3万（上家）→ viewer 可吃
+        ['d', 22], ['c', 22, 'T'],        # viewer 摸打 → current=1
+        ['d', 16], ['c', 16, 'T'],        # 玩家1 摸打 → current=2
+        ['d', 17], ['c', 17, 'T'],        # 玩家2 摸打 → current=3
+        ['d', 13], ['c', 13, 'T'],        # 玩家3（上家）摸打 3万 → viewer 可吃
         ['cl', 13, 0, 11, 12],            # viewer cl 吃（弃牌是顺子右端 → 中间张 12）
         ['c', 19, 'T'],
         ['liuju'],
@@ -360,6 +362,9 @@ def test_claim_chi_actual_chi():
     c = claims[0]
     assert c.claim_tile == 'W3'
     assert c.actual_action == 'chi' and c.actual_tile == 'W2'
+    # chi 候选同时给出完整顺子（展示用：中间张 W2 → 123万）
+    chi = [o for o in c.options if o['action'] == 'chi'][0]
+    assert chi['tile'] == 'W2' and chi['tiles'] == ['W1', 'W2', 'W3']
 
 def test_claim_gang_actual_gang():
     """手上有 3 张 → 可明杠；实际杠了（随后杠上摸打）。"""

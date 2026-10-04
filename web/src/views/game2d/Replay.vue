@@ -43,7 +43,7 @@
                 :key="`${entry.action}-${entry.tile || ''}-${entry.index}`"
                 :class="{ 'is-best': index === 0 }"
               >
-                <span class="ai-panel__action">{{ claimActionLabel(entry) }}</span>
+                <span class="ai-panel__action" :title="claimActionTitle(entry)">{{ claimActionLabel(entry) }}</span>
                 <span class="ai-panel__bar">
                   <i :style="{ width: `${Math.round(entry.prob * 100)}%` }" />
                 </span>
@@ -52,7 +52,7 @@
             </ul>
             <div class="ai-panel__actual" :class="aiData.agree ? 'is-agree' : 'is-disagree'">
               <span>实际选择</span>
-              <span class="ai-panel__action">{{ actualClaimLabel }}</span>
+              <span class="ai-panel__action" :title="actualClaimTitle">{{ actualClaimLabel }}</span>
               <em>{{ aiData.agree ? '与 AI 一致' : '与 AI 分歧' }}</em>
             </div>
           </template>
@@ -1933,10 +1933,45 @@ const CLAIM_ACTION_NAMES: Record<string, string> = {
   pass: '过', hu: '和', chi: '吃', peng: '碰', gang: '杠',
 }
 
-/** claim 候选/实际选择的展示文案：吃 3万 / 碰 5筒 / 过 / 和 */
-function claimActionLabel(entry: { action?: string, tile?: string | null }): string {
-  const name = CLAIM_ACTION_NAMES[String(entry?.action ?? '')] ?? String(entry?.action ?? '—')
+/** 顺子三张 → 紧凑写法：['B7','B8','B9'] → '789筒' */
+function chiRunsLabel(tiles: string[]): string {
+  if (tiles.length !== 3) return tiles.map((t) => aiTileLabel(t)).join(' ')
+  const ranks = tiles.map((t) => String(t).slice(1)).join('')
+  const suit = aiTileLabel(tiles[0]).replace(/[0-9]/g, '')
+  return `${ranks}${suit}`
+}
+
+/** 中间张（引擎动作编码）→ 完整顺子的紧凑写法：'B8' → '789筒' */
+function chiRunsFromMiddle(mid: string): string {
+  const colour = String(mid)[0]
+  const rank = Number(String(mid).slice(1))
+  return chiRunsLabel([`${colour}${rank - 1}`, `${colour}${rank}`, `${colour}${rank + 1}`])
+}
+
+/** claim 候选/实际选择的展示文案：吃 789筒 / 碰 5筒 / 杠 3索 / 过 / 和 */
+function claimActionLabel(entry: { action?: string, tile?: string | null, tiles?: string[] | null }): string {
+  const action = String(entry?.action ?? '')
+  if (action === 'chi') {
+    if (entry?.tiles?.length === 3) return `吃 ${chiRunsLabel(entry.tiles)}`
+    if (entry?.tile) return `吃 ${chiRunsFromMiddle(entry.tile)}`
+    return '吃'
+  }
+  const name = CLAIM_ACTION_NAMES[action] ?? (action || '—')
   return entry?.tile ? `${name} ${aiTileLabel(entry.tile)}` : name
+}
+
+/** 悬停提示：给出完整读法（如「吃 7筒 8筒 9筒」） */
+function claimActionTitle(entry: { action?: string, tile?: string | null, tiles?: string[] | null }): string {
+  if (entry?.action === 'chi') {
+    const mid = entry.tiles?.length === 3 ? entry.tiles[1] : entry.tile
+    if (mid) {
+      const colour = String(mid)[0]
+      const rank = Number(String(mid).slice(1))
+      const full = [rank - 1, rank, rank + 1].map((r) => aiTileLabel(`${colour}${r}`))
+      return `吃 ${full.join(' ')}`
+    }
+  }
+  return claimActionLabel(entry)
 }
 
 const actualClaimLabel = computed(() => {
@@ -1944,6 +1979,12 @@ const actualClaimLabel = computed(() => {
   if (!data || data.kind !== 'claim') return ''
   const label = claimActionLabel({ action: data.actual_action || 'pass', tile: data.actual_tile })
   return data.cuohe ? `${label}（错和）` : label
+})
+
+const actualClaimTitle = computed(() => {
+  const data = aiData.value
+  if (!data || data.kind !== 'claim') return ''
+  return claimActionTitle({ action: data.actual_action || 'pass', tile: data.actual_tile })
 })
 
 function loadAiPanelPosition(): { x: number, y: number } | null {

@@ -72,8 +72,12 @@ def claim_options(agent):
             out.append({'index': idx, 'action': 'hu', 'tile': None})
         elif idx < oa['Peng']:                      # Chi 段
             t = (idx - oa['Chi']) // 3
+            colour, mid = 'WTB'[t // 7], t % 7 + 2   # mid = 顺子中间张（2..8）
+            # tile 是引擎动作空间里的中间张；tiles 是完整顺子（展示用，
+            # 例如中间张 B8 → ['B7','B8','B9']，避免只看「吃 8筒」看不出吃哪三张）
             out.append({'index': idx, 'action': 'chi',
-                        'tile': 'WTB'[t // 7] + str(t % 7 + 2)})
+                        'tile': colour + str(mid),
+                        'tiles': [colour + str(mid - 1), colour + str(mid), colour + str(mid + 1)]})
         elif idx < oa['Gang']:
             out.append({'index': idx, 'action': 'peng',
                         'tile': agent.TILE_LIST[idx - oa['Peng']]})
@@ -240,10 +244,16 @@ def replay_round(round_rec, viewer):
                             mid = chi_middle_tile(tick[1], a)
                         except ValueError:
                             mid = None
-                    pending_claim.actual_action = act
-                    pending_claim.actual_tile = mid
-                    pending_claim.cuohe = cuohe
-                    nodes.append(pending_claim)
+                    # 一致性校验：揭晓出的动作必须在引擎给出的候选里（chi 还要中间张相同）。
+                    # 不一致说明事件流与引擎状态已漂移（数据异常），丢弃该节点而不是
+                    # 展示一个「实际选择不在 AI 候选里」的自相矛盾结论。
+                    if any(o['action'] == act
+                           and (o['tile'] is None or mid is None or o['tile'] == mid)
+                           for o in pending_claim.options):
+                        pending_claim.actual_action = act
+                        pending_claim.actual_tile = mid
+                        pending_claim.cuohe = cuohe
+                        nodes.append(pending_claim)
                     pending_claim = None
             if a == 'reset':
                 # 重置事件（开局补花结束后/跳转）：显式声明当前行动者（player_index 域）。

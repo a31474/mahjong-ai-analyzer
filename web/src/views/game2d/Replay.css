@@ -540,8 +540,8 @@
 .ai-panel__claim-head { margin-bottom: 6px; color: #aeb4b6; font-size: 11px; }
 .ai-panel__claim-head strong { color: #f2f3f3; }
 .ai-panel__action {
-  flex: 0 0 auto;
-  min-width: 52px;
+  flex: 0 0 62px;
+  width: 62px;
   overflow: hidden;
   color: #e8eaea;
   font-size: 11px;
